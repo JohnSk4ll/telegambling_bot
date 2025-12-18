@@ -46,7 +46,11 @@ const defaultData = {
             ]
         }
     ],
-    trades: []
+    trades: [],
+    promos: [],
+    meta: {
+      lastDailyRewardDate: null
+    },
 };
 
 const db = new Low(adapter, defaultData);

@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  telegambling:
+    build: .
+    image: telegambling_bot:latest
+    restart: unless-stopped
+    ports:
+      - "5051:5051"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/src/public/uploads
+    networks:
+      - webnet
+
+networks:
+  webnet: {}

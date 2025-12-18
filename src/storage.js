@@ -22,6 +22,7 @@ export async function createUser(telegramId, username, firstName) {
         firstName: firstName || 'Пользователь',
         coins: 1000,
         inventory: [],
+        banned: false,
         createdAt: new Date().toISOString()
     };
     
@@ -52,11 +53,14 @@ export async function setUserCoins(telegramId, amount) {
 export async function addItemToInventory(telegramId, item) {
     const user = getUser(telegramId);
     if (!user) return null;
-    
-    user.inventory.push({
-        ...item,
-        instanceId: Date.now().toString() + Math.random().toString(36).substr(2, 9)
-    });
+
+    // Если у предмета есть variation, сохраняем её отдельно
+    const itemToAdd = { ...item };
+    if (item.variation) {
+        itemToAdd.variation = { ...item.variation };
+    }
+    itemToAdd.instanceId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    user.inventory.push(itemToAdd);
     await db.write();
     return user;
 }
@@ -77,6 +81,12 @@ export function getAllUsers() {
     return db.data.users;
 }
 
+export async function setAllUsers(usersArr) {
+    db.data.users = usersArr || [];
+    await db.write();
+    return db.data.users;
+}
+
 export async function updateUser(telegramId, updates) {
     const user = getUser(telegramId);
     if (!user) return null;
@@ -86,9 +96,98 @@ export async function updateUser(telegramId, updates) {
     return user;
 }
 
+export async function banUser(telegramId) {
+    const user = getUser(telegramId);
+    if (!user) return null;
+    
+    user.banned = true;
+    await db.write();
+    return user;
+}
+
+export async function unbanUser(telegramId) {
+    const user = getUser(telegramId);
+    if (!user) return null;
+    
+    user.banned = false;
+    await db.write();
+    return user;
+}
+
 // Case functions
 export function getAllCases() {
     return db.data.cases;
+}
+
+
+export async function getAllPromos() {
+    return db.data.promos || [];
+}
+
+export async function createPromo(promo) {
+    // Ensure promos array exists
+    if (!Array.isArray(db.data.promos)) db.data.promos = [];
+    const code = promo.code;
+    const existing = db.data.promos.find(p => p.code === code);
+    if (existing) throw new Error('Promo code already exists');
+    const newPromo = {
+        id: code.toLowerCase(),
+        code: code,
+        amount: Number(promo.amount) || 0,
+        maxUses: Number(promo.maxUses) || 1,
+        uses: 0,
+        usedBy: [],
+        createdAt: new Date().toISOString(),
+        active: true
+    };
+    db.data.promos.push(newPromo);
+    await db.write();
+    return newPromo;
+}
+
+export async function updatePromo(id, changes) {
+    const promo = (db.data.promos || []).find(p => p.id === id);
+    if (!promo) throw new Error('Promo not found');
+    Object.assign(promo, changes);
+    await db.write();
+    return promo;
+}
+
+export async function deletePromo(id) {
+    db.data.promos = (db.data.promos || []).filter(p => p.id !== id);
+    await db.write();
+    return true;
+}
+
+export async function redeemPromo(telegramId, code) {
+    if (!Array.isArray(db.data.promos)) db.data.promos = [];
+    const promo = db.data.promos.find(p => p.code.toLowerCase() === String(code).toLowerCase());
+    if (!promo) return { success: false, message: 'Промокод не найден' };
+    if (!promo.active) return { success: false, message: 'Промокод неактивен' };
+    if (!Array.isArray(promo.usedBy)) promo.usedBy = [];
+    if (promo.usedBy.includes(telegramId)) return { success: false, message: 'Вы уже использовали этот промокод' };
+    if (promo.uses >= promo.maxUses) return { success: false, message: 'Промокод исчерпан' };
+    // apply
+    await updateUserCoins(telegramId, promo.amount);
+    promo.usedBy.push(telegramId);
+    promo.uses = (promo.uses || 0) + 1;
+    await db.write();
+    return { success: true, amount: promo.amount };
+}
+
+export async function giveDailyCoinsToAll(amount = 1000) {
+    const users = db.data.users || [];
+    for (const u of users) {
+        await updateUserCoins(u.telegramId, amount);
+    }
+    if (!db.data.meta) db.data.meta = {};
+    db.data.meta.lastDailyRewardDate = new Date().toISOString();
+    await db.write();
+    return { count: users.length };
+}
+
+export async function getLastDailyRewardDate() {
+    return db.data.meta?.lastDailyRewardDate || null;
 }
 
 export function getCase(caseId) {
@@ -129,19 +228,48 @@ export async function deleteCase(caseId) {
 export function rollCase(caseId) {
     const caseItem = getCase(caseId);
     if (!caseItem || caseItem.items.length === 0) return null;
-    
+
+    // Выбираем предмет по шансам
     const random = Math.random() * 100;
     let cumulative = 0;
-    
+    let selectedItem = null;
     for (const item of caseItem.items) {
         cumulative += item.chance;
-        if (random <= cumulative) {
-            return item;
+        if (random <= cumulative && !selectedItem) {
+            selectedItem = item;
         }
     }
-    
-    // Fallback to last item
-    return caseItem.items[caseItem.items.length - 1];
+    if (!selectedItem) selectedItem = caseItem.items[caseItem.items.length - 1];
+
+    // Если у предмета есть вариации, выбираем вариацию по шансам
+    if (selectedItem.variations && Array.isArray(selectedItem.variations) && selectedItem.variations.length > 0) {
+        const varRand = Math.random() * 100;
+        let varCumulative = 0;
+        let selectedVar = null;
+        for (const v of selectedItem.variations) {
+            varCumulative += Number(v.chance) || 0;
+            if (varRand < varCumulative && !selectedVar) {
+                selectedVar = v;
+                break;
+            }
+        }
+        if (!selectedVar) selectedVar = selectedItem.variations[selectedItem.variations.length - 1];
+        // Возвращаем предмет с вариацией (имя, цена, картинка берутся из вариации)
+        return {
+            ...selectedItem,
+            name: `${selectedItem.name} (${selectedVar.name})`,
+            value: Number(selectedVar.price) || selectedItem.value,
+            image: selectedVar.image || selectedItem.image,
+            variation: {
+                name: selectedVar.name,
+                price: selectedVar.price,
+                image: selectedVar.image,
+                chance: selectedVar.chance
+            }
+        };
+    }
+    // Если вариаций нет, возвращаем обычный предмет
+    return selectedItem;
 }
 
 // Trade functions
@@ -259,4 +387,25 @@ export async function cancelTrade(tradeId) {
     trade.status = 'cancelled';
     await db.write();
     return true;
+}
+
+// Overwrite all cases (replacement import)
+export async function setAllCases(casesArr) {
+    db.data.cases = casesArr || [];
+    await db.write();
+    return db.data.cases;
+}
+
+// Merge/upsert cases: update existing by id or add new ones
+export async function upsertCases(casesArr) {
+    for (const c of casesArr) {
+        const existing = getCase(c.id);
+        if (existing) {
+            Object.assign(existing, c);
+        } else {
+            db.data.cases.push(c);
+        }
+    }
+    await db.write();
+    return db.data.cases;
 }

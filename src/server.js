@@ -2,7 +2,9 @@ import express from 'express';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+// (no import needed for fetch in Node.js v18+)
 import * as storage from './storage.js';
+import xml2js from 'xml2js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const uploadsDir = join(__dirname, 'public', 'uploads');
@@ -14,6 +16,36 @@ if (!existsSync(uploadsDir)) {
 
 export function setupServer(port = 5051) {
     const app = express();
+    // Импорт пользователей из XML
+    app.post('/api/users/import', express.text({ type: 'application/xml' }), async (req, res) => {
+        try {
+            const xml = req.body;
+            if (!xml || typeof xml !== 'string') return res.status(400).json({ error: 'No XML provided' });
+            const parsed = await xml2js.parseStringPromise(xml, { explicitArray: false, mergeAttrs: true });
+            let users = parsed.users && parsed.users.user ? parsed.users.user : [];
+            if (!Array.isArray(users)) users = [users];
+            // Преобразуем пользователей
+            const cleanUsers = users.map(u => ({
+                id: u.id || u.telegramId || String(Date.now()),
+                telegramId: Number(u.telegramId) || 0,
+                username: u.username || '',
+                firstName: u.firstName || '',
+                coins: Number(u.coins) || 0,
+                inventory: (u.inventory && u.inventory.item ? (Array.isArray(u.inventory.item) ? u.inventory.item : [u.inventory.item]) : []).map(it => ({
+                    name: it.name || '',
+                    value: Number(it.value) || 0,
+                    rarity: it.rarity || '',
+                    instanceId: it.instanceId || '',
+                    image: it.image || ''
+                }))
+            }));
+            await storage.setAllUsers(cleanUsers);
+            res.json({ success: true });
+        } catch (err) {
+            console.error('User import error:', err);
+            res.status(400).json({ error: 'Invalid XML or import error: ' + err.message });
+        }
+    });
     
     app.use(express.json({ limit: '10mb' }));
     app.use(express.static(join(__dirname, 'public')));
@@ -57,6 +89,24 @@ export function setupServer(port = 5051) {
         }
         
         const user = await storage.updateUser(parseInt(req.params.telegramId), { inventory });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    });
+
+    // Ban user
+    app.post('/api/users/:telegramId/ban', async (req, res) => {
+        const user = await storage.banUser(parseInt(req.params.telegramId));
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    });
+
+    // Unban user
+    app.post('/api/users/:telegramId/unban', async (req, res) => {
+        const user = await storage.unbanUser(parseInt(req.params.telegramId));
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
@@ -255,33 +305,148 @@ export function setupServer(port = 5051) {
         
         res.json({ items, totalChance: items.reduce((sum, i) => sum + i.chance, 0) });
     });
+
+    // Export cases as JSON/text
+    app.get('/api/cases/export', (req, res) => {
+        // Экспортируем только валидные кейсы и предметы, поддерживаем image, формат XML
+        let cases = storage.getAllCases();
+        if (!Array.isArray(cases)) cases = [];
+        const filtered = cases.filter(c => c && c.id && c.name && Array.isArray(c.items));
+        function escapeXml(str) {
+            return String(str).replace(/[<>&"']/g, function (c) {
+                return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;','\'':'&apos;'}[c];
+            });
+        }
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<cases>\n';
+        for (const c of filtered) {
+            xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}">\n`;
+            for (const it of (c.items || []).filter(it => it && it.id && it.name && it.rarity)) {
+                xml += `    <item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}" chance="${it.chance}" value="${it.value}" rarity="${escapeXml(it.rarity)}"`;
+                if (it.image) xml += ` image="${escapeXml(it.image)}"`;
+                xml += ' />\n';
+            }
+            xml += '  </case>\n';
+        }
+        xml += '</cases>\n';
+        res.setHeader('Content-Disposition', 'attachment; filename="cases.xml"');
+        res.type('application/xml');
+        res.send(xml);
+    });
+
+    // Import cases - supports JSON body: { mode: 'replace'|'merge', cases: [...] }
+    app.post('/api/cases/import', async (req, res) => {
+        const { mode, cases } = req.body;
+        if (!cases || !Array.isArray(cases)) {
+            return res.status(400).json({ error: 'cases must be an array' });
+        }
+        // Фильтруем и валидируем поля, поддерживаем image
+        const cleanCases = cases.map(c => ({
+            id: c.id,
+            name: c.name,
+            price: c.price,
+            items: (c.items || []).map(it => ({
+                id: it.id,
+                name: it.name,
+                chance: Number(it.chance) || 0,
+                value: Number(it.value) || 0,
+                rarity: it.rarity,
+                image: typeof it.image === 'string' ? it.image : ''
+            }))
+        }));
+        // Validate chances for each case
+        for (const c of cleanCases) {
+            if (!c.items || !Array.isArray(c.items)) continue;
+            const total = c.items.reduce((s, it) => s + (parseFloat(it.chance) || 0), 0);
+            if (Math.abs(total - 100) > 0.1) {
+                return res.status(400).json({ error: `Case ${c.id || c.name} chances do not sum to 100% (current ${total}%)` });
+            }
+        }
+        try {
+            if (mode === 'replace') {
+                await storage.setAllCases(cleanCases);
+            } else {
+                await storage.upsertCases(cleanCases);
+            }
+            return res.json({ success: true });
+        } catch (err) {
+            return res.status(500).json({ error: 'Failed to import cases' });
+        }
+    });
+
+    // Promo endpoints
+    app.get('/api/promos', async (req, res) => {
+        const promos = await storage.getAllPromos();
+        res.json(promos);
+    });
+
+    app.post('/api/promos', async (req, res) => {
+        try {
+            const { code, amount, maxUses } = req.body;
+            if (!code) return res.status(400).json({ error: 'code required' });
+            const promo = await storage.createPromo({ code, amount, maxUses });
+            res.json(promo);
+        } catch (err) {
+            res.status(400).json({ error: err.message });
+        }
+    });
+
+    app.put('/api/promos/:id', async (req, res) => {
+        try {
+            const updated = await storage.updatePromo(req.params.id, req.body);
+            res.json(updated);
+        } catch (err) {
+            res.status(400).json({ error: err.message });
+        }
+    });
+
+    app.delete('/api/promos/:id', async (req, res) => {
+        try {
+            await storage.deletePromo(req.params.id);
+            res.json({ ok: true });
+        } catch (err) {
+            res.status(400).json({ error: err.message });
+        }
+    });
+
+    // Redeem promo (user)
+    app.post('/api/promos/redeem', async (req, res) => {
+        try {
+            const { telegramId, code } = req.body;
+            if (!telegramId || !code) return res.status(400).json({ error: 'telegramId and code required' });
+            const result = await storage.redeemPromo(String(telegramId), code);
+            if (!result.success) return res.status(400).json({ error: result.message });
+            res.json({ ok: true, amount: result.amount });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
     
     // ============ IMAGE UPLOAD ENDPOINT ============
     
     // Upload image for item
-    app.post('/api/upload-image', (req, res) => {
+    app.post('/api/upload-image', async (req, res) => {
         const { imageData, filename } = req.body;
-        
-        if (!imageData || !filename) {
-            return res.status(400).json({ error: 'Image data and filename required' });
-        }
-        
-        try {
-            // Remove data:image/xxx;base64, prefix
-            const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
-            const buffer = Buffer.from(base64Data, 'base64');
-            
-            // Generate unique filename
-            const ext = filename.split('.').pop() || 'png';
-            const uniqueFilename = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`;
-            const filepath = join(uploadsDir, uniqueFilename);
-            
-            writeFileSync(filepath, buffer);
-            
-            res.json({ success: true, url: `/uploads/${uniqueFilename}` });
-        } catch (err) {
-            res.status(500).json({ error: 'Failed to save image' });
-        }
+    if (!imageData || !filename) return res.status(400).json({ error: 'No image data' });
+    try {
+        // imageData: data:image/png;base64,...
+        const base64 = imageData.split(',')[1];
+        // Postimages API: https://postimages.org/doc/api
+        const form = new URLSearchParams();
+        form.append('key', 'anonymous');
+        form.append('upload', base64);
+        form.append('format', 'json');
+        const response = await fetch('https://api.postimages.org/1/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: form.toString()
+        });
+        const result = await response.json();
+        if (!result.url || !result.url) throw new Error('Postimages upload failed');
+        // result.url gives the direct image link
+        res.json({ url: result.url });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
     });
     
     // Delete image

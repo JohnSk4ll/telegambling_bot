@@ -344,22 +344,79 @@
         
         <div class="tabs">
             <button class="tab active" data-tab="cases">📦 Кейсы</button>
+            <button class="tab" data-tab="promos">🏷️ Промокоды</button>
             <button class="tab" data-tab="users">👥 Пользователи</button>
         </div>
         
         <!-- Cases Panel -->
         <div class="panel active" id="cases-panel">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap:10px;">
                 <h2>Управление кейсами</h2>
-                <button class="btn-primary" onclick="openCaseModal()">+ Создать кейс</button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-secondary" onclick="exportCases()">⬇️ Выгрузить кейсы</button>
+                    <button class="btn-secondary" onclick="openImportModal()">⬆️ Загрузить кейсы</button>
+                    <button class="btn-primary" onclick="openCaseModal()">+ Создать кейс</button>
+                </div>
             </div>
             
             <div id="cases-list"></div>
         </div>
         
+        <!-- Promos Panel -->
+        <div class="panel" id="promos-panel">
+            <h2 style="margin-bottom: 12px;">Управление промокодами</h2>
+
+            <div style="margin-bottom:10px;">
+                <button class="btn-primary" onclick="openCreatePromo()">+ Создать промокод</button>
+            </div>
+
+            <div id="promoCreate" style="display:none; margin-bottom:12px; border:1px solid rgba(255,255,255,0.05); padding:10px; border-radius:6px; background: rgba(0,0,0,0.2);">
+                <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                    <div style="display:flex; flex-direction:column;">
+                        <label for="promoCode" style="margin-bottom:2px; color:#ffd700;">Код промокода</label>
+                        <input id="promoCode" placeholder="Код (например: NEWYEAR2025)" style="width:150px;" />
+                    </div>
+                    <div style="display:flex; flex-direction:column;">
+                        <label for="promoAmount" style="margin-bottom:2px; color:#ffd700;">Сумма</label>
+                        <input id="promoAmount" placeholder="Сколько монет даст" type="number" style="width:120px;" />
+                    </div>
+                    <div style="display:flex; flex-direction:column;">
+                        <label for="promoMaxUses" style="margin-bottom:2px; color:#ffd700;">Максимум использований</label>
+                        <input id="promoMaxUses" placeholder="Сколько раз можно использовать" type="number" style="width:160px;" />
+                    </div>
+                    <div style="display:flex; flex-direction:column; justify-content:flex-end; gap:4px;">
+                        <button class="btn-primary" style="margin-bottom:4px;" onclick="createPromo()">Создать</button>
+                        <button class="btn-secondary" onclick="closeCreatePromo()">Отмена</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="promosList"></div>
+        </div>
+
         <!-- Users Panel -->
         <div class="panel" id="users-panel">
             <h2 style="margin-bottom: 20px;">Управление пользователями</h2>
+            <div style="display:flex; gap:8px; margin-bottom:16px;">
+                <button class="btn-secondary" onclick="exportUsers()">⬇️ Выгрузить пользователей</button>
+                <button class="btn-secondary" onclick="openImportUsersModal()">⬆️ Загрузить пользователей</button>
+            </div>
+                <!-- Import Users Modal -->
+                <div id="importUsersModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1001;">
+                    <div style="background:#fff; padding:20px; width:720px; max-width:95%; border-radius:8px;">
+                        <h3>Импорт пользователей</h3>
+                        <p>Вставьте XML экспортированных пользователей или загрузите файл.</p>
+                        <textarea id="importUsersTextarea" style="width:100%; height:240px; font-family:monospace; margin-bottom:8px;" placeholder='<users>...</users>'></textarea>
+                        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                            <input type="file" id="importUsersFile" accept=".xml,application/xml,text/xml" />
+                        </div>
+                        <button onclick="closeImportUsersModal()" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:22px;color:#fff;cursor:pointer;line-height:1;">&times;</button>
+                        <div style="display:flex; gap:8px; justify-content:flex-end;">
+                            <button class="btn-secondary" onclick="closeImportUsersModal()">Отмена</button>
+                            <button class="btn-primary" onclick="performImportUsers()">Импортировать</button>
+                        </div>
+                    </div>
+                </div>
             
             <table id="users-table">
                 <thead>
@@ -377,6 +434,27 @@
         </div>
     </div>
     
+    <!-- Import Modal -->
+    <div id="importModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:20px; width:720px; max-width:95%; border-radius:8px;">
+            <h3>Импорт кейсов</h3>
+            <p>Вставьте JSON экспортированных кейсов или загрузите файл.</p>
+            <textarea id="importTextarea" style="width:100%; height:240px; font-family:monospace; margin-bottom:8px;" placeholder='[ { "id": "basic", "name": "Basic", "items": [...] } ]'></textarea>
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+                <label>Режим:</label>
+                <select id="importMode">
+                    <option value="merge">Объединить (merge)</option>
+                    <option value="replace">Заменить (replace)</option>
+                </select>
+                <input type="file" id="importFile" accept=".xml,application/xml,text/xml" />
+            </div>
+                <button onclick="closeImportModal()" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:22px;color:#fff;cursor:pointer;line-height:1;">&times;</button>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button class="btn-secondary" onclick="closeImportModal()">Отмена</button>
+                <button class="btn-primary" onclick="performImport()">Импортировать</button>
+            </div>
+        </div>
+    </div>
     <!-- Case Modal -->
     <div class="modal" id="case-modal">
         <div class="modal-content">
@@ -459,6 +537,90 @@
     </div>
     
     <script>
+                // Экспорт пользователей в XML
+                async function exportUsers() {
+                    const res = await fetch('/api/users');
+                    const users = await res.json();
+                    let xml = '<users>\n';
+                    for (const u of users) {
+                        xml += `  <user id="${u.id}" telegramId="${u.telegramId}" coins="${u.coins}" username="${u.username||''}" firstName="${u.firstName||''}">\n`;
+                        xml += `    <inventory>\n`;
+                        for (const item of u.inventory) {
+                            xml += `      <item name="${escapeXml(item.name)}" value="${item.value}" rarity="${item.rarity||''}" instanceId="${item.instanceId||''}" image="${item.image||''}" />\n`;
+                        }
+                        xml += `    </inventory>\n`;
+                        xml += `  </user>\n`;
+                    }
+                    xml += '</users>';
+                    const blob = new Blob([xml], { type: 'application/xml' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'users.xml';
+                    a.click();
+                }
+
+                // Импорт пользователей из XML
+                function openImportUsersModal() {
+                    document.getElementById('importUsersTextarea').value = '';
+                    document.getElementById('importUsersFile').value = '';
+                    document.getElementById('importUsersModal').style.display = 'flex';
+                }
+                function closeImportUsersModal() {
+                    document.getElementById('importUsersModal').style.display = 'none';
+                }
+                async function performImportUsers() {
+                    const fileInput = document.getElementById('importUsersFile');
+                    let text = document.getElementById('importUsersTextarea').value.trim();
+                    if (!text && fileInput.files.length) {
+                        text = await fileInput.files[0].text();
+                    }
+                    if (!text) return alert('Нет данных для импорта!');
+                    // Отправляем XML на сервер
+                    const res = await fetch('/api/users/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/xml' },
+                        body: text
+                    });
+                    if (!res.ok) {
+                        alert('Ошибка импорта пользователей');
+                        return;
+                    }
+                    closeImportUsersModal();
+                    loadData();
+                    alert('Пользователи импортированы!');
+                }
+
+                // XML-escape helper
+                function escapeXml(str) {
+                    return String(str).replace(/[<>&"']/g, function (c) {
+                        switch (c) {
+                            case '<': return '&lt;';
+                            case '>': return '&gt;';
+                            case '&': return '&amp;';
+                            case '"': return '&quot;';
+                            case "'": return '&apos;';
+                        }
+                    });
+                }
+            // Добавить вариацию предмету (без pop-up)
+            function addVariation(itemIndex) {
+                if (!window.currentItems[itemIndex].variations) window.currentItems[itemIndex].variations = [];
+                window.currentItems[itemIndex].variations.push({ name: '', chance: 0, price: 0, image: '' });
+                renderItems();
+            }
+
+            // Удалить вариацию
+            function removeVariation(itemIndex, varIndex) {
+                if (!window.currentItems[itemIndex].variations) return;
+                window.currentItems[itemIndex].variations.splice(varIndex, 1);
+                renderItems();
+            }
+
+            // Редактировать вариацию
+            function updateVariation(itemIndex, varIndex, field, value) {
+                if (!window.currentItems[itemIndex].variations) return;
+                window.currentItems[itemIndex].variations[varIndex][field] = value;
+            }
         // Tabs
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -478,16 +640,49 @@
             setTimeout(() => notif.remove(), 3000);
         }
         
+        // Ban/Unban user
+        async function banUser(telegramId) {
+            if (!confirm('Вы уверены, что хотите забанить этого пользователя?')) return;
+            try {
+                const res = await fetch(`/api/users/${telegramId}/ban`, { method: 'POST' });
+                if (res.ok) {
+                    showNotification('Пользователь забанен', 'success');
+                    loadData();
+                } else {
+                    showNotification('Ошибка бана пользователя', 'error');
+                }
+            } catch (err) {
+                showNotification('Ошибка бана пользователя', 'error');
+            }
+        }
+
+        async function unbanUser(telegramId) {
+            try {
+                const res = await fetch(`/api/users/${telegramId}/unban`, { method: 'POST' });
+                if (res.ok) {
+                    showNotification('Пользователь разбанен', 'success');
+                    loadData();
+                } else {
+                    showNotification('Ошибка разбана пользователя', 'error');
+                }
+            } catch (err) {
+                showNotification('Ошибка разбана пользователя', 'error');
+            }
+        }
+
         // Load data
         async function loadData() {
             try {
-                const [casesRes, usersRes] = await Promise.all([
+                const [casesRes, usersRes, promosRes] = await Promise.all([
                     fetch('/api/cases'),
-                    fetch('/api/users')
+                    fetch('/api/users'),
+                    fetch('/api/promos')
                 ]);
                 
                 const cases = await casesRes.json();
+                window.cases = cases; // Глобально для экспорта
                 const users = await usersRes.json();
+                const promos = await promosRes.json();
                 
                 // Update stats
                 document.getElementById('stat-users').textContent = users.length;
@@ -497,8 +692,202 @@
                 
                 renderCases(cases);
                 renderUsers(users);
+                renderPromos && renderPromos(promos);
             } catch (err) {
                 showNotification('Ошибка загрузки данных', 'error');
+            }
+        }
+
+        // Export cases to a JSON file
+        async function exportCases() {
+            try {
+                // Получаем кейсы из памяти (например, window.cases или аналогичная переменная)
+                const cases = window.cases || [];
+                function escapeXml(str) {
+                    return String(str).replace(/[<>&"']/g, function (c) {
+                        return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;','\'':'&apos;'}[c];
+                    });
+                }
+                let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<cases>\n';
+                for (const c of cases) {
+                    if (!c || !c.id || !c.name || !Array.isArray(c.items)) continue;
+                    xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}">\n`;
+                    for (const it of (c.items || [])) {
+                        if (!it || !it.id || !it.name || !it.rarity) continue;
+                        if (Array.isArray(it.variations) && it.variations.length) {
+                            xml += `    <item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}" chance="${it.chance}" value="${it.value}" rarity="${escapeXml(it.rarity)}"`;
+                            if (it.image) xml += ` image="${escapeXml(it.image)}"`;
+                            xml += '>'; // Открывающий тег
+                            for (const v of it.variations) {
+                                xml += `\n      <variation name="${escapeXml(v.name)}" chance="${v.chance}" price="${v.price}"`;
+                                if (v.image) xml += ` image="${escapeXml(v.image)}"`;
+                                xml += ' />';
+                            }
+                            xml += '\n    </item>\n';
+                        } else {
+                            xml += `    <item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}" chance="${it.chance}" value="${it.value}" rarity="${escapeXml(it.rarity)}"`;
+                            if (it.image) xml += ` image="${escapeXml(it.image)}"`;
+                            xml += ' />\n';
+                        }
+                    }
+                    xml += '  </case>\n';
+                }
+                xml += '</cases>\n';
+                const blob = new Blob([xml], { type: 'application/xml' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'cases.xml';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                alert('Ошибка при выгрузке кейсов: ' + err.message);
+            }
+        }
+
+        function openImportModal() {
+            document.getElementById('importTextarea').value = '';
+            document.getElementById('importMode').value = 'merge';
+            document.getElementById('importFile').value = '';
+            document.getElementById('importModal').style.display = 'flex';
+        }
+
+        function closeImportModal() {
+            document.getElementById('importModal').style.display = 'none';
+        }
+
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsText(file);
+            });
+        }
+
+        async function performImport() {
+            try {
+                const fileInput = document.getElementById('importFile');
+                let text = document.getElementById('importTextarea').value.trim();
+                if (!text && fileInput.files && fileInput.files[0]) {
+                    text = await readFileAsText(fileInput.files[0]);
+                }
+                if (!text) return alert('Пожалуйста, вставьте XML или выберите файл.');
+                // Только XML!
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(text, 'application/xml');
+                if (xmlDoc.querySelector('parsererror')) return alert('Ошибка парсинга XML');
+                const parsed = Array.from(xmlDoc.querySelectorAll('case')).map(c => ({
+                    id: c.getAttribute('id'),
+                    name: c.getAttribute('name'),
+                    price: Number(c.getAttribute('price')),
+                    items: Array.from(c.querySelectorAll('item')).map(it => {
+                        const base = {
+                            id: it.getAttribute('id'),
+                            name: it.getAttribute('name'),
+                            chance: Number(it.getAttribute('chance')),
+                            value: Number(it.getAttribute('value')),
+                            rarity: it.getAttribute('rarity'),
+                            image: it.getAttribute('image') || ''
+                        };
+                        const variations = Array.from(it.querySelectorAll('variation')).map(v => ({
+                            name: v.getAttribute('name'),
+                            chance: Number(v.getAttribute('chance')),
+                            price: Number(v.getAttribute('price')),
+                            image: v.getAttribute('image') || ''
+                        }));
+                        if (variations.length) base.variations = variations;
+                        return base;
+                    })
+                }));
+                if (!Array.isArray(parsed) || !parsed.length) return alert('В XML не найдено ни одного кейса.');
+                const mode = document.getElementById('importMode').value;
+                const res = await fetch('/api/cases/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode, cases: parsed })
+                });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.error || 'Import failed');
+                alert('Импорт завершён.');
+                closeImportModal();
+                await loadCases();
+            } catch (err) {
+                alert('Ошибка при импорте: ' + err.message);
+            }
+        }
+
+        // Promo functions
+        function openCreatePromo() {
+            document.getElementById('promoCreate').style.display = 'block';
+            document.getElementById('promoCode').value = '';
+            document.getElementById('promoAmount').value = 0;
+            document.getElementById('promoMaxUses').value = 1;
+        }
+
+        function closeCreatePromo() {
+            document.getElementById('promoCreate').style.display = 'none';
+        }
+
+        async function createPromo() {
+            const code = document.getElementById('promoCode').value.trim();
+            const amount = parseInt(document.getElementById('promoAmount').value);
+            const maxUses = parseInt(document.getElementById('promoMaxUses').value);
+            if (!code) return alert('Код обязателен');
+            try {
+                const res = await fetch('/api/promos', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, amount, maxUses })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Ошибка');
+                showNotification('Промокод создан');
+                closeCreatePromo();
+                loadData();
+            } catch (err) {
+                showNotification(err.message || 'Ошибка при создании', 'error');
+            }
+        }
+
+        function renderPromos(promos) {
+            const container = document.getElementById('promosList');
+            container.innerHTML = promos.map(p => `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <h3>${p.code} ${p.active ? '' : '(неактивен)'}</h3>
+                            <p>Сумма: ${p.amount} | Использований: ${p.uses || 0} / ${p.maxUses}</p>
+                            <p>Пользователи: ${p.usedBy ? p.usedBy.length : 0}</p>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn-secondary" onclick="togglePromoActive('${p.id}', ${p.active})">${p.active ? 'Отключить' : 'Включить'}</button>
+                            <button class="btn-danger" onclick="deletePromo('${p.id}')">Удалить</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('') || '<p>Промокодов пока нет</p>';
+        }
+
+        async function deletePromo(id) {
+            if (!confirm('Удалить промокод?')) return;
+            try {
+                await fetch(`/api/promos/${id}`, { method: 'DELETE' });
+                showNotification('Промокод удалён');
+                loadData();
+            } catch (err) {
+                showNotification('Ошибка удаления', 'error');
+            }
+        }
+
+        async function togglePromoActive(id, currentlyActive) {
+            try {
+                await fetch(`/api/promos/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !currentlyActive }) });
+                showNotification('Обновлено');
+                loadData();
+            } catch (err) {
+                showNotification('Ошибка обновления', 'error');
             }
         }
         
@@ -533,21 +922,25 @@
         function renderUsers(users) {
             const tbody = document.getElementById('users-tbody');
             tbody.innerHTML = users.map(u => `
-                <tr>
+                <tr style="${u.banned ? 'background: rgba(231, 76, 60, 0.2);' : ''}">
                     <td>${u.telegramId}</td>
-                    <td>${u.firstName}</td>
+                    <td>${u.firstName} ${u.banned ? '🚫' : ''}</td>
                     <td>${u.username ? '@' + u.username : '-'}</td>
                     <td>${u.coins}</td>
                     <td>${u.inventory.length}</td>
-                    <td>
+                    <td style="display: flex; gap: 5px;">
                         <button class="btn-secondary" onclick="editUser(${u.telegramId})">✏️</button>
+                        ${u.banned 
+                            ? `<button class="btn-primary" onclick="unbanUser(${u.telegramId})">✅ Разбанить</button>`
+                            : `<button class="btn-danger" onclick="banUser(${u.telegramId})">🚫 Забанить</button>`
+                        }
                     </td>
                 </tr>
             `).join('') || '<tr><td colspan="6">Пользователей пока нет</td></tr>';
         }
         
         // Case Modal
-        let currentItems = [];
+        window.currentItems = [];
         let itemCounter = 0;
         
         function openCaseModal(caseData = null) {
@@ -630,6 +1023,24 @@
             const container = document.getElementById('items-container');
             container.innerHTML = currentItems.map((item, index) => `
                 <div class="item-editor">
+                    <div style="margin-bottom:8px;">
+                        <button type="button" class="btn-secondary" onclick="addVariation(${index})">+ Вариация</button>
+                    </div>
+                    ${(item.variations||[]).length ? `<div style='margin-bottom:8px;'>
+                        <b>Вариации:</b>
+                        <div style='font-size:12px;color:#aaa;margin-bottom:4px;'>Название | Шанс | Цена | Картинка (url)</div>
+                        <ul style='margin:0;padding-left:18px;'>
+                        ${item.variations.map((v,i)=>`
+                            <li style='margin-bottom:8px;display:flex;align-items:center;gap:8px;'>
+                                <input type='text' placeholder='Название' style='width:120px;' value='${v.name || ''}' onchange='updateVariation(${index},${i},"name",this.value)'>
+                                <input type='number' placeholder='Шанс' style='width:60px;' value='${v.chance || 0}' min='0' max='100' onchange='updateVariation(${index},${i},"chance",parseFloat(this.value))'>
+                                <input type='number' placeholder='Цена' style='width:80px;' value='${v.price || 0}' min='0' onchange='updateVariation(${index},${i},"price",parseFloat(this.value))'>
+                                <input type='text' placeholder='Картинка (url)' style='width:180px;' value='${v.image || ''}' onchange='updateVariation(${index},${i},"image",this.value)'>
+                                ${v.image ? `<img src='${v.image}' style='width:24px;height:24px;object-fit:cover;vertical-align:middle;border-radius:3px;'>` : ''}
+                                <button onclick='removeVariation(${index},${i})' style='color:red;margin-left:8px;'>✕</button>
+                            </li>`).join('')}
+                        </ul>
+                    </div>` : ''}
                     <div class="item-editor-header">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             ${item.image ? `<img src="${item.image}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;">` : ''}
@@ -665,12 +1076,13 @@
                                 📷 ${item.image ? 'Изменить' : 'Добавить'} фото
                             </span>
                         </label>
+                        <input type="text" placeholder="Вставьте ссылку на postimages" style="width:220px;" id="item-link-input-${index}" value="${item.image && item.image.startsWith('http') ? item.image : ''}">
+                        <button type="button" class="btn-secondary" onclick="setItemImageLink(${index})">Вставить ссылку</button>
                         ${item.image ? `<button type="button" class="btn-danger" style="padding: 6px 12px;" onclick="removeItemImage(${index})">🗑️ Удалить фото</button>` : ''}
                         ${item.image ? `<span style="color: #2ecc71; font-size: 12px;">✓ Фото загружено</span>` : ''}
                     </div>
                 </div>
             `).join('');
-            
             updateChanceTotal();
         }
         
@@ -834,10 +1246,30 @@
                                 📷 ${item.image ? 'Изменить' : 'Добавить'} фото
                             </span>
                         </label>
+                        <input type="text" placeholder="Вставьте ссылку на postimages" style="width:220px;" id="useritem-link-input-${index}" value="${item.image && item.image.startsWith('http') ? item.image : ''}">
+                        <button type="button" class="btn-secondary" onclick="setUserItemImageLink(${index})">Вставить ссылку</button>
                         ${item.image ? `<button type="button" class="btn-danger" style="padding: 6px 12px;" onclick="removeUserItemImage(${index})">🗑️</button>` : ''}
                     </div>
                 </div>
             `).join('') || '<p>Инвентарь пуст</p>';
+        }
+        // Глобальные функции для вставки ссылки на изображение
+        function setItemImageLink(index) {
+            const input = document.getElementById(`item-link-input-${index}`);
+            if (input && input.value.trim()) {
+                currentItems[index].image = input.value.trim();
+                renderItems();
+                showNotification('Ссылка на изображение добавлена');
+            }
+        }
+
+        function setUserItemImageLink(index) {
+            const input = document.getElementById(`useritem-link-input-${index}`);
+            if (input && input.value.trim()) {
+                currentUserInventory[index].image = input.value.trim();
+                renderUserInventory();
+                showNotification('Ссылка на изображение добавлена');
+            }
         }
         
         async function handleUserItemImageUpload(index, file) {

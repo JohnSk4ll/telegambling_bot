@@ -9,13 +9,39 @@ export function setupBot(token) {
         { command: 'connect', description: 'Зарегистрироваться в боте (/подключиться)' },
         { command: 'balance', description: 'Проверить баланс (/баланс)' },
         { command: 'cases', description: 'Список кейсов (/кейсы)' },
+        { command: 'view', description: 'Посмотреть содержимое кейса (/просмотр [id])' },
         { command: 'open', description: 'Открыть кейс (/открыть [id])' },
         { command: 'inventory', description: 'Инвентарь (/инвентарь)' },
         { command: 'sell', description: 'Продать предмет (/продать [id])' },
+        { command: 'promocode', description: 'Активировать промокод (/промокод <код>)' },
         { command: 'trade', description: 'Обмен (/обмен)' },
         { command: 'trades', description: 'Входящие обмены (/обмены)' },
         { command: 'help', description: 'Справка (/помощь)' }
     ]);
+        // /промокод or /promocode - Redeem promo code
+        bot.onText(/\/(промокод|promocode)(?:\s+(.+))?/i, async (msg, match) => {
+            const chatId = msg.chat.id;
+            const user = storage.getUser(msg.from.id);
+            if (!user) {
+                bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+                return;
+            }
+            if (user.banned) {
+                bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+                return;
+            }
+            const code = match[2]?.trim();
+            if (!code) {
+                bot.sendMessage(chatId, 'Введите промокод после команды.\nПример: /промокод NEWYEAR2025');
+                return;
+            }
+            const result = await storage.redeemPromo(msg.from.id, code);
+            if (result.success) {
+                bot.sendMessage(chatId, `✅ Промокод активирован!\n\n💰 Вы получили: ${result.amount} монет`);
+            } else {
+                bot.sendMessage(chatId, `❌ ${result.message}`);
+            }
+        });
     
     // /подключиться or /connect - Register
     bot.onText(/\/(подключиться|connect)/, async (msg) => {
@@ -48,6 +74,11 @@ export function setupBot(token) {
             return;
         }
         
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
         bot.sendMessage(chatId,
             `💰 Ваш баланс: ${user.coins} монет\n` +
             `📦 Предметов в инвентаре: ${user.inventory.length}`
@@ -71,7 +102,70 @@ export function setupBot(token) {
             message += `   💰 Цена: ${c.price} монет\n`;
             message += `   🎲 Предметов: ${c.items.length}\n\n`;
         });
-        message += `Для открытия используйте: /открыть [id]`;
+        message += `Для открытия используйте: /открыть [id]\n`;
+        message += `Для просмотра содержимого: /просмотр [id]`;
+        
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    });
+
+    // /просмотр or /view - View case contents
+    bot.onText(/\/(просмотр|view)(?:\s+(.+))?/, (msg, match) => {
+        const chatId = msg.chat.id;
+        const caseId = match[2]?.trim();
+        
+        if (!caseId) {
+            const cases = storage.getAllCases();
+            let message = '🔍 Укажите ID кейса для просмотра:\n\n';
+            cases.forEach(c => {
+                message += `• \`${c.id}\` - ${c.name}\n`;
+            });
+            message += '\nПример: /просмотр basic_case';
+            bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+            return;
+        }
+        
+        const caseItem = storage.getCase(caseId);
+        if (!caseItem) {
+            bot.sendMessage(chatId, '❌ Кейс не найден!');
+            return;
+        }
+        
+        const rarityEmojis = {
+            blue: '🔵',
+            purple: '🟣',
+            pink: '🩷',
+            red: '🔴',
+            gold: '🌟'
+        };
+        
+        const rarityNames = {
+            blue: 'Обычный',
+            purple: 'Необычный',
+            pink: 'Редкий',
+            red: 'Эпический',
+            gold: 'Легендарный'
+        };
+        
+        let message = `📦 **${caseItem.name}**\n`;
+        message += `💰 Цена: ${caseItem.price} монет\n`;
+        message += `🎲 Всего предметов: ${caseItem.items.length}\n\n`;
+        message += `**Содержимое:**\n\n`;
+        
+        caseItem.items.forEach((item, idx) => {
+            message += `${idx + 1}\. ${rarityEmojis[item.rarity] || '🎁'} **${item.name}**\n`;
+            message += `   📊 Редкость: ${rarityNames[item.rarity] || item.rarity}\n`;
+            message += `   💎 Стоимость: ${item.value || 0} монет\n`;
+            message += `   🎯 Шанс: ${item.chance}%\n`;
+            
+            // Показать вариации если есть
+            if (item.variations && Array.isArray(item.variations) && item.variations.length > 0) {
+                message += `   🧩 Вариации: ${item.variations.length}\n`;
+                item.variations.forEach((v, vIdx) => {
+                    message += `      ${vIdx + 1}\) ${v.name} - ${v.price} монет (${v.chance}%)\n`;
+                });
+            }
+            message += `\n`;
+        });
         
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     });
@@ -83,6 +177,11 @@ export function setupBot(token) {
         
         if (!user) {
             bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
             return;
         }
         
@@ -124,7 +223,7 @@ export function setupBot(token) {
         
         // Add to inventory
         await storage.addItemToInventory(msg.from.id, wonItem);
-        
+
         const rarityEmojis = {
             blue: '🔵',
             purple: '🟣',
@@ -132,7 +231,7 @@ export function setupBot(token) {
             red: '🔴',
             gold: '🌟'
         };
-        
+
         const rarityNames = {
             blue: 'Обычный',
             purple: 'Необычный',
@@ -140,16 +239,35 @@ export function setupBot(token) {
             red: 'Эпический',
             gold: 'Легендарный'
         };
-        
-        const messageText = `🎰 Вы открыли **${caseItem.name}**!\n\n` +
-            `${rarityEmojis[wonItem.rarity] || '🎁'} Вы выиграли: **${wonItem.name}**\n` +
-            `📊 Редкость: ${rarityNames[wonItem.rarity] || wonItem.rarity}\n` +
-            `💎 Стоимость: ${wonItem.value} монет\n\n` +
-            `💰 Ваш баланс: ${user.coins - caseItem.price} монет`;
-        
-        // Send with image if available
+
+        // Экранирование Markdown для Telegram
+        function escapeMarkdown(text) {
+            return String(text)
+                .replace(/([_\*\[\]()~`>#+=|{}.!-])/g, '\\$1');
+        }
+
+        const messageText =
+            `🎰 Вы открыли ${escapeMarkdown(caseItem.name)}!\n\n` +
+            `${rarityEmojis[wonItem.rarity] || '🎁'} Вы выиграли: ${escapeMarkdown(wonItem.name)}\n` +
+            `📊 Редкость: ${escapeMarkdown(rarityNames[wonItem.rarity] || wonItem.rarity)}\n` +
+            `💎 Стоимость: ${(wonItem.value || 0)} монет\n` +
+            (wonItem.variation ? `🧩 Вариация: ${escapeMarkdown(wonItem.variation.name)}\n` : '') +
+            `\n💰 Ваш баланс: ${user.coins - caseItem.price} монет`;
+
+        // Всегда отправлять фото если есть картинка
         if (wonItem.image) {
-            bot.sendPhoto(chatId, wonItem.image.startsWith('http') ? wonItem.image : `${process.env.BOT_URL || 'http://localhost:5051'}${wonItem.image}`, {
+            let photoUrl = wonItem.image;
+            // Если у вариации есть картинка, используем её
+            if (wonItem.variation && wonItem.variation.image) {
+                photoUrl = wonItem.variation.image;
+            }
+            // Если путь начинается с /uploads, всегда используем http://localhost:5051
+            if (photoUrl.startsWith('/uploads')) {
+                photoUrl = `http://localhost:5051${photoUrl}`;
+            } else if (!/^https?:\/\//.test(photoUrl)) {
+                photoUrl = `${process.env.BOT_URL || 'http://localhost:5051'}${photoUrl}`;
+            }
+            bot.sendPhoto(chatId, photoUrl, {
                 caption: messageText,
                 parse_mode: 'Markdown'
             }).catch(() => {
@@ -168,6 +286,11 @@ export function setupBot(token) {
         
         if (!user) {
             bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
             return;
         }
         
@@ -198,7 +321,16 @@ export function setupBot(token) {
             if (byRarity[rarity]) {
                 message += `\n${rarityNames[rarity]}:\n`;
                 byRarity[rarity].forEach(item => {
-                    message += `  • ${item.name} (${item.value} монет)\n`;
+                    let itemName = item.name;
+                    let itemValue = item.value;
+                    if (item.variation) {
+                        itemName = `${item.name}`;
+                        itemValue = item.value;
+                    }
+                    message += `  • ${itemName} (${itemValue} монет)\n`;
+                    if (item.variation) {
+                        message += `    🧩 Вариация: ${item.variation.name}\n`;
+                    }
                     message += `    ID: \`${item.instanceId}\`\n`;
                 });
             }
@@ -217,6 +349,11 @@ export function setupBot(token) {
         
         if (!user) {
             bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
             return;
         }
         
@@ -297,6 +434,11 @@ export function setupBot(token) {
         
         if (!user) {
             bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
             return;
         }
         
@@ -450,6 +592,11 @@ export function setupBot(token) {
             return;
         }
         
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
         const trades = storage.getTradesForUser(msg.from.id);
         
         if (trades.length === 0) {
@@ -496,6 +643,11 @@ export function setupBot(token) {
             return;
         }
         
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
         const tradeId = match[2]?.trim();
         if (!tradeId) {
             bot.sendMessage(chatId, '❌ Укажите ID обмена: /принять [ID]');
@@ -534,6 +686,11 @@ export function setupBot(token) {
         
         if (!user) {
             bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
             return;
         }
         
