@@ -23,6 +23,7 @@ export async function createUser(telegramId, username, firstName) {
         coins: 1000,
         inventory: [],
         banned: false,
+        lastDaily: null,
         createdAt: new Date().toISOString()
     };
     
@@ -135,6 +136,46 @@ export async function resetUser(telegramId) {
     user.banned = false;
     await db.write();
     return user;
+}
+
+export function claimDaily(telegramId) {
+    const user = getUser(telegramId);
+    if (!user) return { success: false, message: 'Пользователь не найден' };
+    
+    const now = new Date();
+    const DAILY_AMOUNT = 1000;
+    const DAILY_COOLDOWN = 24 * 60 * 60 * 1000; // 24 hours in ms
+    
+    // Check if lastDaily exists and if cooldown has passed
+    if (user.lastDaily) {
+        const lastDaily = new Date(user.lastDaily);
+        const timePassed = now - lastDaily;
+        
+        if (timePassed < DAILY_COOLDOWN) {
+            const timeLeft = DAILY_COOLDOWN - timePassed;
+            const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+            const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+            
+            return {
+                success: false,
+                message: `Вы уже получили ежедневный бонус!`,
+                timeLeft,
+                hoursLeft,
+                minutesLeft
+            };
+        }
+    }
+    
+    // Claim daily bonus
+    user.coins += DAILY_AMOUNT;
+    user.lastDaily = now.toISOString();
+    db.write();
+    
+    return {
+        success: true,
+        amount: DAILY_AMOUNT,
+        newBalance: user.coins
+    };
 }
 
 // Case functions

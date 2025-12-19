@@ -91,12 +91,16 @@ export function setupBot(token) {
         if (userOrMsg.from) {
             const username = userOrMsg.from.username;
             if (username) return `@${username}`;
-            return userOrMsg.from.first_name || 'пользователь';
+            const name = userOrMsg.from.first_name || userOrMsg.from.last_name;
+            if (name) return name;
+            return `пользователь #${userOrMsg.from.id}`;
         }
         // Если это объект пользователя из базы данных
         const username = userOrMsg.username;
         if (username) return `@${username}`;
-        return userOrMsg.firstName || 'пользователь';
+        const name = userOrMsg.firstName || userOrMsg.lastName;
+        if (name) return name;
+        return `пользователь #${userOrMsg.telegramId}`;
     };
     
     // Обертка для безопасной обработки команд
@@ -122,6 +126,7 @@ export function setupBot(token) {
         { command: 'sell', description: 'Продать предмет (/продать [id])' },
         { command: 'promocode', description: 'Активировать промокод (/промокод <код>)' },
         { command: 'cointoss', description: 'Игра в монетку 50/50 (/cointoss @user сумма)' },
+        { command: 'daily', description: 'Ежедневный бонус (1000 монет)' },
         { command: 'trade', description: 'Обмен (/обмен)' },
         { command: 'trades', description: 'Входящие обмены (/обмены)' },
         { command: 'help', description: 'Справка (/помощь)' }
@@ -337,6 +342,9 @@ export function setupBot(token) {
         // Add to inventory
         await storage.addItemToInventory(msg.from.id, wonItem);
 
+        // Get updated user balance
+        const updatedUser = storage.getUser(msg.from.id);
+
         const rarityEmojis = {
             blue: '🔵',
             purple: '🟣',
@@ -366,7 +374,7 @@ export function setupBot(token) {
             `📊 Редкость: ${escapeMarkdown(rarityNames[wonItem.rarity] || wonItem.rarity)}\n` +
             `💎 Стоимость: ${(wonItem.value || 0)} монет\n` +
             (wonItem.variation ? `🧩 Вариация: ${escapeMarkdown(wonItem.variation.name)}\n` : '') +
-            `\n💰 Ваш баланс: ${user.coins - caseItem.price} монет`;
+            `\n💰 Ваш баланс: ${updatedUser.coins} монет`;
 
         // Всегда отправлять фото если есть картинка
         if (wonItem.image) {
@@ -512,10 +520,13 @@ export function setupBot(token) {
             await storage.updateUser(msg.from.id, { inventory: [] });
             await storage.updateUserCoins(msg.from.id, totalValue);
             
+            // Get updated user balance
+            const updatedUser = storage.getUser(msg.from.id);
+            
             bot.sendMessage(chatId,
                 `✅ Продано ${itemCount} предметов!\n\n` +
                 `💰 Получено: ${totalValue} монет\n` +
-                `💵 Ваш баланс: ${user.coins + totalValue} монет`
+                `💵 Ваш баланс: ${updatedUser.coins} монет`
             );
             return;
         }
@@ -532,10 +543,13 @@ export function setupBot(token) {
         await storage.removeItemFromInventory(msg.from.id, itemId);
         await storage.updateUserCoins(msg.from.id, item.value);
         
+        // Get updated user balance
+        const updatedUser = storage.getUser(msg.from.id);
+        
         bot.sendMessage(chatId,
             `✅ Продано: **${item.name}**\n\n` +
             `💰 Получено: ${item.value} монет\n` +
-            `💵 Ваш баланс: ${user.coins + item.value} монет`,
+            `💵 Ваш баланс: ${updatedUser.coins} монет`,
             { parse_mode: 'Markdown' }
         );
     });
@@ -671,7 +685,7 @@ export function setupBot(token) {
             return;
         }
         
-        let message = '🪙 **Входящие вызовы:**\n\n';
+        let message = '🪙 Входящие вызовы:\n\n';
         
         for (const toss of tosses) {
             const challenger = storage.getUser(toss.challengerId);
@@ -685,7 +699,7 @@ export function setupBot(token) {
         
         message += `Используйте /accept ID или /decline ID`;
         
-        await sendReply(chatId, msg.message_id, message, { parse_mode: 'Markdown' });
+        await sendReply(chatId, msg.message_id, message);
     }));
 
     // /accept - Accept coin toss
@@ -807,6 +821,74 @@ export function setupBot(token) {
             );
         } catch (error) {
             console.error('Failed to notify other user:', error.message);
+        }
+    }));
+
+    // /daily - Daily bonus
+    bot.onText(/\/daily/, safeHandler(async (msg) => {
+        const chatId = msg.chat.id;
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
+        const result = storage.claimDaily(msg.from.id);
+        
+        if (result.success) {
+            await sendReply(chatId, msg.message_id,
+                `🎁 Ежедневный бонус получен!\n\n` +
+                `💰 +${result.amount} монет\n` +
+                `💵 Ваш баланс: ${result.newBalance} монет\n\n` +
+                `⏰ Следующий бонус через 24 часа`
+            );
+        } else {
+            const hours = result.hoursLeft || 0;
+            const minutes = result.minutesLeft || 0;
+            await sendReply(chatId, msg.message_id,
+                `⏳ ${result.message}\n\n` +
+                `⏰ Следующий бонус через: ${hours}ч ${minutes}м`
+            );
+        }
+    }));
+
+    // /daily - Daily bonus
+    bot.onText(/\/daily/, safeHandler(async (msg) => {
+        const chatId = msg.chat.id;
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
+        const result = storage.claimDaily(msg.from.id);
+        
+        if (result.success) {
+            await sendReply(chatId, msg.message_id,
+                `🎁 Ежедневный бонус получен!\n\n` +
+                `💰 +${result.amount} монет\n` +
+                `💵 Ваш баланс: ${result.newBalance} монет\n\n` +
+                `⏰ Следующий бонус через 24 часа`
+            );
+        } else {
+            const hours = result.hoursLeft || 0;
+            const minutes = result.minutesLeft || 0;
+            await sendReply(chatId, msg.message_id,
+                `⏳ ${result.message}\n\n` +
+                `⏰ Следующий бонус через: ${hours}ч ${minutes}м`
+            );
         }
     }));
     

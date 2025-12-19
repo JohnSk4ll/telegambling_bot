@@ -1118,13 +1118,13 @@
         }
         
         function autoBalanceChances() {
-            // CS:GO case rarity distribution (adjusted for rarer high-tier items)
+            // CS:GO-like distribution: purple boosted to 22%, blue reduced
             const distribution = { 
-                blue: 79.92,    // Mil-Spec (Consumer Grade)
-                purple: 15.98,  // Restricted
-                pink: 3.20,     // Classified
-                red: 0.64,      // Covert
-                gold: 0.26      // Exceedingly Rare (Knife/Gloves)
+                blue: 72.78,    // Most common (reduced to give to purple)
+                purple: 22.00,  // Boosted from 15.80%
+                pink: 3.15,     // Rare (like CS:GO Classified)
+                red: 1.28,      // Very rare (doubled from 0.64%)
+                gold: 0.79      // Extremely rare (tripled from 0.26%)
             };
             
             // Count items by rarity
