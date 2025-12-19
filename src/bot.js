@@ -85,7 +85,10 @@ export function setupBot(token) {
     
     // Хелпер для упоминания пользователя (создаёт @username)
     const mentionUser = (userOrMsg) => {
-        if (!userOrMsg) return 'пользователь';
+        if (!userOrMsg) {
+            console.warn('mentionUser: received null/undefined user');
+            return 'пользователь';
+        }
         
         // Если это объект сообщения (с msg.from)
         if (userOrMsg.from) {
@@ -95,12 +98,21 @@ export function setupBot(token) {
             if (name) return name;
             return `пользователь #${userOrMsg.from.id}`;
         }
+        
         // Если это объект пользователя из базы данных
         const username = userOrMsg.username;
         if (username) return `@${username}`;
-        const name = userOrMsg.firstName || userOrMsg.lastName;
+        
+        const firstName = userOrMsg.firstName || userOrMsg.first_name;
+        const lastName = userOrMsg.lastName || userOrMsg.last_name;
+        const name = firstName || lastName;
         if (name) return name;
-        return `пользователь #${userOrMsg.telegramId}`;
+        
+        const telegramId = userOrMsg.telegramId || userOrMsg.id;
+        if (telegramId) return `пользователь #${telegramId}`;
+        
+        console.warn('mentionUser: could not extract user info from:', JSON.stringify(userOrMsg));
+        return 'пользователь';
     };
     
     // Обертка для безопасной обработки команд
@@ -401,6 +413,162 @@ export function setupBot(token) {
         }
     }));
     
+    // Helper functions for inventory navigation
+    const rarityOrder = ['contraband', 'gold', 'red', 'pink', 'purple', 'blue'];
+    const rarityNames = {
+        blue: '🔵 Обычные',
+        purple: '🟣 Необычные',
+        pink: '🩷 Редкие',
+        red: '🔴 Эпические',
+        gold: '🌟 Легендарные',
+        contraband: '❗ Контрабанда'
+    };
+    
+    // Storage for item name mapping (to avoid long callback_data)
+    const itemNameCache = new Map();
+    
+    const getItemHash = (itemName) => {
+        // Simple hash function
+        let hash = 0;
+        for (let i = 0; i < itemName.length; i++) {
+            const char = itemName.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        const hashStr = Math.abs(hash).toString(36);
+        itemNameCache.set(hashStr, itemName);
+        return hashStr;
+    };
+    
+    const getItemName = (hash) => {
+        return itemNameCache.get(hash) || '';
+    };
+    
+    // Level 1: Show rarities
+    const generateInventoryRarities = (user) => {
+        const byRarity = {};
+        user.inventory.forEach(item => {
+            if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
+            byRarity[item.rarity].push(item);
+        });
+        
+        let message = `📦 **Ваш инвентарь** (${user.inventory.length} предметов)\n\n`;
+        message += `Выберите редкость:\n\n`;
+        
+        const keyboard = [];
+        rarityOrder.forEach(rarity => {
+            if (byRarity[rarity] && byRarity[rarity].length > 0) {
+                const count = byRarity[rarity].length;
+                message += `${rarityNames[rarity]}: ${count} шт.\n`;
+                keyboard.push([{
+                    text: `${rarityNames[rarity]} (${count})`,
+                    callback_data: `inv_r_${rarity}`
+                }]);
+            }
+        });
+        
+        message += `\n💰 Общая стоимость: ${user.inventory.reduce((sum, i) => sum + i.value, 0)} монет`;
+        
+        return { message, keyboard };
+    };
+    
+    // Level 2: Show unique items in rarity
+    const generateInventoryItems = (user, rarity) => {
+        const items = user.inventory.filter(i => i.rarity === rarity);
+        
+        // Group by name
+        const byName = {};
+        items.forEach(item => {
+            if (!byName[item.name]) byName[item.name] = [];
+            byName[item.name].push(item);
+        });
+        
+        let message = `📦 **${rarityNames[rarity]}** (${items.length} шт.)\n\n`;
+        message += `Выберите предмет:\n\n`;
+        
+        const keyboard = [];
+        Object.keys(byName).sort().forEach(itemName => {
+            const count = byName[itemName].length;
+            const avgPrice = Math.round(byName[itemName].reduce((sum, i) => sum + i.value, 0) / count);
+            message += `• ${itemName} x${count} (~${avgPrice} монет)\n`;
+            
+            const hash = getItemHash(itemName);
+            keyboard.push([{
+                text: `${itemName} (${count} шт.)`,
+                callback_data: `inv_i_${rarity}_${hash}_0`
+            }]);
+        });
+        
+        keyboard.push([{ text: '⬅️ Назад', callback_data: 'inv_main' }]);
+        
+        return { message, keyboard };
+    };
+    
+    // Level 3: Show specific instances with pagination
+    const generateInventoryInstances = (user, rarity, itemName, page = 0) => {
+        const ITEMS_PER_PAGE = 5;
+        
+        const items = user.inventory.filter(i => 
+            i.rarity === rarity && i.name === itemName
+        );
+        
+        const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
+        const startIdx = page * ITEMS_PER_PAGE;
+        const endIdx = Math.min(startIdx + ITEMS_PER_PAGE, items.length);
+        const pageItems = items.slice(startIdx, endIdx);
+        
+        let message = `📦 **${itemName}** (${items.length} шт.)\n`;
+        message += `${rarityNames[rarity]}\n`;
+        message += `Страница ${page + 1}/${totalPages}\n\n`;
+        
+        pageItems.forEach((item, idx) => {
+            const variationText = item.variation ? ` > ${item.variation.name}` : '';
+            message += `${startIdx + idx + 1}. ${item.name}${variationText}\n`;
+            message += `   💰 ${item.value} монет | ID: \`${item.instanceId}\`\n`;
+        });
+        
+        const totalValue = items.reduce((sum, i) => sum + i.value, 0);
+        message += `\n💰 Общая стоимость: ${totalValue} монет`;
+        message += `\n\n💡 /продать ${itemName} ${items.length} - продать все`;
+        
+        const keyboard = [];
+        const navButtons = [];
+        
+        const hash = getItemHash(itemName);
+        
+        if (page > 0) {
+            navButtons.push({
+                text: '◀️',
+                callback_data: `inv_i_${rarity}_${hash}_${page - 1}`
+            });
+        }
+        
+        if (totalPages > 1) {
+            navButtons.push({
+                text: `${page + 1}/${totalPages}`,
+                callback_data: 'inv_noop'
+            });
+        }
+        
+        if (page < totalPages - 1) {
+            navButtons.push({
+                text: '▶️',
+                callback_data: `inv_i_${rarity}_${hash}_${page + 1}`
+            });
+        }
+        
+        if (navButtons.length > 0) {
+            keyboard.push(navButtons);
+        }
+        
+        keyboard.push([{
+            text: '⬅️ Назад',
+            callback_data: `inv_r_${rarity}`
+        }]);
+        
+        return { message, keyboard };
+    };
+    
     // /инвентарь or /inventory - View inventory
     bot.onText(/\/(инвентарь|inventory)/, (msg) => {
         const chatId = msg.chat.id;
@@ -421,47 +589,105 @@ export function setupBot(token) {
             return;
         }
         
-        let message = `📦 **Ваш инвентарь** (${user.inventory.length} предметов):\n\n`;
+        const { message, keyboard } = generateInventoryRarities(user);
         
-        // Group by rarity
-        const byRarity = {};
-        user.inventory.forEach(item => {
-            if (!byRarity[item.rarity]) byRarity[item.rarity] = [];
-            byRarity[item.rarity].push(item);
-        });
-        
-        const rarityOrder = ['gold', 'red', 'pink', 'purple', 'blue'];
-        const rarityNames = {
-            blue: '🔵 Обычные',
-            purple: '🟣 Необычные',
-            pink: '🩷 Редкие',
-            red: '🔴 Эпические',
-            gold: '🌟 Легендарные'
-        };
-        
-        rarityOrder.forEach(rarity => {
-            if (byRarity[rarity]) {
-                message += `\n${rarityNames[rarity]}:\n`;
-                byRarity[rarity].forEach(item => {
-                    let itemName = item.name;
-                    let itemValue = item.value;
-                    if (item.variation) {
-                        itemName = `${item.name}`;
-                        itemValue = item.value;
-                    }
-                    message += `  • ${itemName} (${itemValue} монет)\n`;
-                    if (item.variation) {
-                        message += `    🧩 Вариация: ${item.variation.name}\n`;
-                    }
-                    message += `    ID: \`${item.instanceId}\`\n`;
-                });
+        bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: keyboard
             }
         });
+    });
+    
+    // Handle inventory navigation callbacks
+    bot.on('callback_query', async (query) => {
+        const chatId = query.message.chat.id;
+        const messageId = query.message.message_id;
+        const data = query.data;
         
-        message += `\n💰 Общая стоимость: ${user.inventory.reduce((sum, i) => sum + i.value, 0)} монет`;
-        message += `\n\n💡 Для продажи используйте: /продать [ID]`;
+        const user = storage.getUser(query.from.id);
         
-        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        if (!user) {
+            bot.answerCallbackQuery(query.id, { text: '❌ Пользователь не найден' });
+            return;
+        }
+        
+        // Back to main inventory menu
+        if (data === 'inv_main') {
+            if (user.inventory.length === 0) {
+                bot.answerCallbackQuery(query.id, { text: '❌ Инвентарь пуст' });
+                return;
+            }
+            
+            const { message, keyboard } = generateInventoryRarities(user);
+            
+            bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: keyboard
+                }
+            });
+            
+            bot.answerCallbackQuery(query.id);
+            return;
+        }
+        
+        // Select rarity (inv_r_<rarity>)
+        if (data.startsWith('inv_r_')) {
+            const rarity = data.substring(6);
+            
+            const { message, keyboard } = generateInventoryItems(user, rarity);
+            
+            bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: keyboard
+                }
+            });
+            
+            bot.answerCallbackQuery(query.id);
+            return;
+        }
+        
+        // Select item and page (inv_i_<rarity>_<hash>_<page>)
+        if (data.startsWith('inv_i_')) {
+            const parts = data.split('_');
+            if (parts.length >= 5) {
+                const rarity = parts[2];
+                const hash = parts[3];
+                const page = parseInt(parts[4]);
+                const itemName = getItemName(hash);
+                
+                if (!itemName) {
+                    bot.answerCallbackQuery(query.id, { text: '❌ Предмет не найден' });
+                    return;
+                }
+                
+                const { message, keyboard } = generateInventoryInstances(user, rarity, itemName, page);
+                
+                bot.editMessageText(message, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: keyboard
+                    }
+                });
+                
+                bot.answerCallbackQuery(query.id);
+            }
+            return;
+        }
+        
+        // No-op callback
+        if (data === 'inv_noop') {
+            bot.answerCallbackQuery(query.id);
+            return;
+        }
     });
     
     // /продать or /sell - Sell item to bot
@@ -479,17 +705,19 @@ export function setupBot(token) {
             return;
         }
         
-        const itemId = match[2]?.trim();
+        const input = match[2]?.trim();
         
-        if (!itemId) {
+        if (!input) {
             if (user.inventory.length === 0) {
                 bot.sendMessage(chatId, '📦 Ваш инвентарь пуст. Нечего продавать!');
                 return;
             }
             
             let message = `💰 **Продажа предметов**\n\n`;
-            message += `Укажите ID предмета для продажи:\n`;
-            message += `/продать [ID]\n\n`;
+            message += `Варианты использования:\n`;
+            message += `• /продать [ID] - продать по ID\n`;
+            message += `• /продать [название] [количество] - продать по названию\n`;
+            message += `• /продать все - продать всё\n\n`;
             message += `Ваши предметы:\n`;
             
             user.inventory.slice(0, 10).forEach(item => {
@@ -507,7 +735,7 @@ export function setupBot(token) {
         }
         
         // Handle "all" to sell everything
-        if (itemId.toLowerCase() === 'all' || itemId.toLowerCase() === 'все') {
+        if (input.toLowerCase() === 'all' || input.toLowerCase() === 'все') {
             if (user.inventory.length === 0) {
                 bot.sendMessage(chatId, '📦 Ваш инвентарь пуст!');
                 return;
@@ -531,8 +759,57 @@ export function setupBot(token) {
             return;
         }
         
-        // Find item in inventory
-        const item = user.inventory.find(i => i.instanceId === itemId);
+        // Try to parse as "name quantity"
+        const parts = input.split(/\s+/);
+        const lastPart = parts[parts.length - 1];
+        const quantity = parseInt(lastPart);
+        
+        // If last part is a number, treat as sell by name
+        if (!isNaN(quantity) && quantity > 0 && parts.length > 1) {
+            const itemName = parts.slice(0, -1).join(' ');
+            
+            // Find items by name
+            const matchingItems = user.inventory.filter(i => 
+                i.name.toLowerCase() === itemName.toLowerCase()
+            );
+            
+            if (matchingItems.length === 0) {
+                bot.sendMessage(chatId, `❌ Предметы "${itemName}" не найдены в инвентаре!`);
+                return;
+            }
+            
+            if (matchingItems.length < quantity) {
+                bot.sendMessage(chatId, 
+                    `❌ У вас только ${matchingItems.length} шт. "${itemName}"!\n` +
+                    `Невозможно продать ${quantity} шт.`
+                );
+                return;
+            }
+            
+            // Sell specified quantity
+            const itemsToSell = matchingItems.slice(0, quantity);
+            const totalValue = itemsToSell.reduce((sum, i) => sum + i.value, 0);
+            
+            // Remove items and add coins
+            for (const item of itemsToSell) {
+                await storage.removeItemFromInventory(msg.from.id, item.instanceId);
+            }
+            await storage.updateUserCoins(msg.from.id, totalValue);
+            
+            // Get updated user balance
+            const updatedUser = storage.getUser(msg.from.id);
+            
+            bot.sendMessage(chatId,
+                `✅ Продано: **${itemName}** x${quantity}\n\n` +
+                `💰 Получено: ${totalValue} монет\n` +
+                `💵 Ваш баланс: ${updatedUser.coins} монет`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+        
+        // Try to find by ID
+        const item = user.inventory.find(i => i.instanceId === input);
         
         if (!item) {
             bot.sendMessage(chatId, '❌ Предмет не найден в вашем инвентаре!');
@@ -540,7 +817,7 @@ export function setupBot(token) {
         }
         
         // Remove item and add coins
-        await storage.removeItemFromInventory(msg.from.id, itemId);
+        await storage.removeItemFromInventory(msg.from.id, input);
         await storage.updateUserCoins(msg.from.id, item.value);
         
         // Get updated user balance
@@ -746,18 +1023,35 @@ export function setupBot(token) {
         
         const challenger = storage.getUser(toss.challengerId);
         const opponent = storage.getUser(toss.opponentId);
-        const winner = storage.getUser(result.winnerId);
-        const loser = storage.getUser(result.loserId);
+        const winner = result.winner;
+        const loser = result.loser;
+        
+        // Создаём Telegram mention ссылки
+        const mentionChallenger = challenger.username 
+            ? `@${challenger.username}` 
+            : `[${challenger.firstName || 'Игрок'}](tg://user?id=${challenger.telegramId})`;
+        
+        const mentionOpponent = opponent.username 
+            ? `@${opponent.username}` 
+            : `[${opponent.firstName || 'Игрок'}](tg://user?id=${opponent.telegramId})`;
+        
+        const mentionWinner = winner.username 
+            ? `@${winner.username}` 
+            : `[${winner.firstName || 'Игрок'}](tg://user?id=${winner.telegramId})`;
+        
+        const mentionLoser = loser.username 
+            ? `@${loser.username}` 
+            : `[${loser.firstName || 'Игрок'}](tg://user?id=${loser.telegramId})`;
         
         const resultMessage =
             `🪙 **Орёл и решка!**\n\n` +
-            `${mentionUser(challenger)} VS ${mentionUser(opponent)}\n` +
+            `${mentionChallenger} VS ${mentionOpponent}\n` +
             `💰 Ставка: ${toss.amount} монет каждый\n\n` +
             `🎲 Подбрасываем монетку...\n\n` +
             `${result.isHeads ? '🔵 Орёл!' : '⚫ Решка!'}\n\n` +
-            `🏆 Победитель: ${mentionUser(winner)}\n` +
-            `💸 Проигравший: ${mentionUser(loser)}\n\n` +
-            `✅ ${mentionUser(winner)} получает ${toss.amount * 2} монет!`;
+            `🏆 Победитель: ${mentionWinner}\n` +
+            `💸 Проигравший: ${mentionLoser}\n\n` +
+            `✅ ${mentionWinner} получает ${toss.amount * 2} монет!`;
         
         await sendReply(chatId, msg.message_id, resultMessage, { parse_mode: 'Markdown' });
         

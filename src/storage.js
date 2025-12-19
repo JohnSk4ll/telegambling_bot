@@ -1,8 +1,41 @@
-import db from './db.js';
+import db, { debouncedWrite, forceWrite } from './db.js';
+
+// Cache for frequently accessed data
+const userCache = new Map();
+const CACHE_TTL = 5000; // 5 seconds
+
+// Helper to get cached user
+function getCachedUser(telegramId) {
+    const cached = userCache.get(telegramId);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.user;
+    }
+    return null;
+}
+
+// Helper to update cache
+function updateUserCache(telegramId, user) {
+    userCache.set(telegramId, {
+        user,
+        timestamp: Date.now()
+    });
+}
+
+// Helper to invalidate cache
+function invalidateUserCache(telegramId) {
+    userCache.delete(telegramId);
+}
 
 // User functions
 export function getUser(telegramId) {
-    return db.data.users.find(u => u.telegramId === telegramId);
+    const cached = getCachedUser(telegramId);
+    if (cached) return cached;
+    
+    const user = db.data.users.find(u => u.telegramId === telegramId);
+    if (user) {
+        updateUserCache(telegramId, user);
+    }
+    return user;
 }
 
 export function getUserByUsername(username) {
@@ -28,7 +61,8 @@ export async function createUser(telegramId, username, firstName) {
     };
     
     db.data.users.push(newUser);
-    await db.write();
+    updateUserCache(telegramId, newUser);
+    await debouncedWrite();
     
     return { success: true, user: newUser };
 }
@@ -44,7 +78,8 @@ export async function updateUserCoins(telegramId, amount) {
     }
     
     user.coins = newBalance;
-    await db.write();
+    updateUserCache(telegramId, user);
+    await debouncedWrite();
     return user;
 }
 
@@ -73,7 +108,8 @@ export async function addItemToInventory(telegramId, item) {
     }
     itemToAdd.instanceId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
     user.inventory.push(itemToAdd);
-    await db.write();
+    invalidateUserCache(telegramId);
+    await debouncedWrite();
     return user;
 }
 
@@ -85,7 +121,8 @@ export async function removeItemFromInventory(telegramId, instanceId) {
     if (itemIndex === -1) return null;
     
     const removed = user.inventory.splice(itemIndex, 1)[0];
-    await db.write();
+    invalidateUserCache(telegramId);
+    await debouncedWrite();
     return removed;
 }
 
@@ -467,7 +504,7 @@ export function getAllCoinTosses() {
 
 export function getCoinTossesForUser(telegramId) {
     if (!Array.isArray(db.data.coinTosses)) db.data.coinTosses = [];
-    return db.data.coinTosses.filter(ct => ct.challengedUserId === telegramId && ct.status === 'pending');
+    return db.data.coinTosses.filter(ct => ct.opponentId === telegramId && ct.status === 'pending');
 }
 
 export function getCoinTossById(coinTossId) {
@@ -528,9 +565,12 @@ export async function executeCoinToss(coinTossId) {
     return { 
         success: true, 
         coinToss, 
+        winnerId: winner.telegramId,
+        loserId: loser.telegramId,
         winner,
         loser,
-        winnerIsChallenger 
+        winnerIsChallenger,
+        isHeads: winnerIsChallenger
     };
 }
 

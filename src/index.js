@@ -7,10 +7,28 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection:', reason);
     process.exit(1);
 });
+
 import 'dotenv/config';
 import { setupBot } from './bot.js';
 import { setupServer } from './server.js';
 import * as storage from './storage.js';
+import { forceWrite } from './db.js';
+
+// Graceful shutdown - force write pending data
+const shutdown = async (signal) => {
+    console.log(`\n${signal} received. Saving data...`);
+    try {
+        await forceWrite();
+        console.log('Data saved successfully');
+        process.exit(0);
+    } catch (error) {
+        console.error('Error saving data:', error);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 

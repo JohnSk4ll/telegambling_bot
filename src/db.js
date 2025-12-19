@@ -69,4 +69,53 @@ if (!db.data.cases) db.data.cases = defaultData.cases;
 if (!db.data.trades) db.data.trades = [];
 await db.write();
 
+// Debounced write mechanism to prevent excessive disk I/O
+let writeTimeout = null;
+let writePromise = null;
+let pendingWrite = false;
+
+const debouncedWrite = () => {
+    if (writeTimeout) {
+        clearTimeout(writeTimeout);
+    }
+    
+    pendingWrite = true;
+    
+    return new Promise((resolve, reject) => {
+        writeTimeout = setTimeout(async () => {
+            if (!pendingWrite) {
+                resolve();
+                return;
+            }
+            
+            try {
+                await db.write();
+                pendingWrite = false;
+                writePromise = null;
+                resolve();
+            } catch (error) {
+                console.error('DB write error:', error);
+                reject(error);
+            }
+        }, 100); // 100ms debounce
+        
+        writePromise = writePromise || Promise.resolve();
+    });
+};
+
+// Force immediate write
+const forceWrite = async () => {
+    if (writeTimeout) {
+        clearTimeout(writeTimeout);
+        writeTimeout = null;
+    }
+    
+    if (pendingWrite) {
+        await db.write();
+        pendingWrite = false;
+    }
+};
+
+// Export both db and optimized write functions
+export { debouncedWrite, forceWrite };
 export default db;

@@ -46,6 +46,63 @@ export function setupServer(port = 5051) {
             res.status(400).json({ error: 'Invalid XML or import error: ' + err.message });
         }
     });
+
+    // Импорт кейсов из XML
+    app.post('/api/cases/import-xml', express.text({ type: 'application/xml' }), async (req, res) => {
+        try {
+            const xml = req.body;
+            if (!xml || typeof xml !== 'string') return res.status(400).json({ error: 'No XML provided' });
+            const parsed = await xml2js.parseStringPromise(xml, { explicitArray: false, mergeAttrs: true });
+            let casesData = parsed.cases && parsed.cases.case ? parsed.cases.case : [];
+            if (!Array.isArray(casesData)) casesData = [casesData];
+            
+            // Преобразуем кейсы
+            const cleanCases = casesData.map(c => {
+                let items = c.item ? (Array.isArray(c.item) ? c.item : [c.item]) : [];
+                return {
+                    id: c.id,
+                    name: c.name,
+                    price: Number(c.price) || 0,
+                    items: items.map(it => {
+                        const item = {
+                            id: it.id,
+                            name: it.name,
+                            chance: Number(it.chance) || 0,
+                            value: Number(it.value) || 0,
+                            rarity: it.rarity,
+                            image: it.image || ''
+                        };
+                        // Обрабатываем вариации если есть
+                        if (it.variation) {
+                            let variations = Array.isArray(it.variation) ? it.variation : [it.variation];
+                            item.variations = variations.map(v => ({
+                                name: v.name,
+                                chance: Number(v.chance) || 0,
+                                price: Number(v.price) || 0
+                            }));
+                        }
+                        return item;
+                    })
+                };
+            });
+            
+            // Валидация шансов
+            for (const c of cleanCases) {
+                const total = c.items.reduce((s, it) => s + (parseFloat(it.chance) || 0), 0);
+                if (Math.abs(total - 100) > 0.1) {
+                    return res.status(400).json({ 
+                        error: `Case ${c.id || c.name} chances do not sum to 100% (current ${total}%)` 
+                    });
+                }
+            }
+            
+            await storage.setAllCases(cleanCases);
+            res.json({ success: true, imported: cleanCases.length });
+        } catch (err) {
+            console.error('Cases XML import error:', err);
+            res.status(400).json({ error: 'Invalid XML or import error: ' + err.message });
+        }
+    });
     
     app.use(express.json({ limit: '10mb' }));
     app.use(express.static(join(__dirname, 'public')));
@@ -234,15 +291,16 @@ export function setupServer(port = 5051) {
     
     // Generate balanced case items
     app.post('/api/cases/generate-items', (req, res) => {
-        const { blueItems, purpleItems, pinkItems, redItems, goldItems } = req.body;
+        const { blueItems, purpleItems, pinkItems, redItems, goldItems, contrabandItems } = req.body;
         
-        // Default rarity distribution
+        // Default rarity distribution (CS2 standard)
         const rarityChances = {
-            blue: 50,    // 50% total for blue
-            purple: 25,  // 25% total for purple
-            pink: 15,    // 15% total for pink
-            red: 8,      // 8% total for red
-            gold: 2      // 2% total for gold
+            blue: 79.92,     // 79.92% total for blue (Mil-Spec)
+            purple: 15.98,   // 15.98% total for purple (Restricted)
+            pink: 3.20,      // 3.20% total for pink (Classified)
+            red: 0.64,       // 0.64% total for red (Covert)
+            gold: 0.25,      // 0.25% total for gold (Special Items)
+            contraband: 0.01 // 0.01% total for contraband
         };
         
         const items = [];
@@ -312,6 +370,19 @@ export function setupServer(port = 5051) {
             });
         });
         
+        // Generate contraband items
+        const contrabandCount = contrabandItems?.length || 1;
+        const contrabandChanceEach = rarityChances.contraband / contrabandCount;
+        (contrabandItems || []).forEach((item, i) => {
+            items.push({
+                id: item.id || `contraband_${i + 1}`,
+                name: item.name || `❗ Контрабанда ${i + 1}`,
+                rarity: 'contraband',
+                chance: contrabandChanceEach,
+                value: item.value || 10000 + i * 5000
+            });
+        });
+        
         res.json({ items, totalChance: items.reduce((sum, i) => sum + i.chance, 0) });
     });
 
@@ -330,9 +401,20 @@ export function setupServer(port = 5051) {
         for (const c of filtered) {
             xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}">\n`;
             for (const it of (c.items || []).filter(it => it && it.id && it.name && it.rarity)) {
-                xml += `    <item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}" chance="${it.chance}" value="${it.value}" rarity="${escapeXml(it.rarity)}"`;
-                if (it.image) xml += ` image="${escapeXml(it.image)}"`;
-                xml += ' />\n';
+                const hasVariations = it.variations && Array.isArray(it.variations) && it.variations.length > 0;
+                if (hasVariations) {
+                    xml += `    <item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}" chance="${it.chance}" value="${it.value}" rarity="${escapeXml(it.rarity)}"`;
+                    if (it.image) xml += ` image="${escapeXml(it.image)}"`;
+                    xml += '>\n';
+                    for (const v of it.variations) {
+                        xml += `      <variation name="${escapeXml(v.name)}" chance="${v.chance}" price="${v.price}" />\n`;
+                    }
+                    xml += '    </item>\n';
+                } else {
+                    xml += `    <item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}" chance="${it.chance}" value="${it.value}" rarity="${escapeXml(it.rarity)}"`;
+                    if (it.image) xml += ` image="${escapeXml(it.image)}"`;
+                    xml += ' />\n';
+                }
             }
             xml += '  </case>\n';
         }
@@ -348,19 +430,30 @@ export function setupServer(port = 5051) {
         if (!cases || !Array.isArray(cases)) {
             return res.status(400).json({ error: 'cases must be an array' });
         }
-        // Фильтруем и валидируем поля, поддерживаем image
+        // Фильтруем и валидируем поля, поддерживаем image и вариации
         const cleanCases = cases.map(c => ({
             id: c.id,
             name: c.name,
             price: c.price,
-            items: (c.items || []).map(it => ({
-                id: it.id,
-                name: it.name,
-                chance: Number(it.chance) || 0,
-                value: Number(it.value) || 0,
-                rarity: it.rarity,
-                image: typeof it.image === 'string' ? it.image : ''
-            }))
+            items: (c.items || []).map(it => {
+                const item = {
+                    id: it.id,
+                    name: it.name,
+                    chance: Number(it.chance) || 0,
+                    value: Number(it.value) || 0,
+                    rarity: it.rarity,
+                    image: typeof it.image === 'string' ? it.image : ''
+                };
+                // Добавляем вариации если они есть
+                if (it.variations && Array.isArray(it.variations) && it.variations.length > 0) {
+                    item.variations = it.variations.map(v => ({
+                        name: v.name,
+                        chance: Number(v.chance) || 0,
+                        price: Number(v.price) || 0
+                    }));
+                }
+                return item;
+            })
         }));
         // Validate chances for each case
         for (const c of cleanCases) {
