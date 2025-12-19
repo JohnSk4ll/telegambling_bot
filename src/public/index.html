@@ -477,6 +477,11 @@
                 <label>Цена (монеты)</label>
                 <input type="number" id="case-price" placeholder="100" min="1" required>
                 
+                <label style="display: flex; align-items: center; gap: 8px; margin-top: 15px;">
+                    <input type="checkbox" id="case-enabled" style="width: auto;">
+                    <span>Кейс включён (доступен пользователям)</span>
+                </label>
+                
                 <h3 style="margin: 20px 0 10px;">Предметы</h3>
                 
                 <div class="chance-total" id="chance-total">
@@ -494,9 +499,14 @@
                     <button type="button" class="btn-secondary" onclick="addItem('contraband')">+ ❗ Контрабанда</button>
                 </div>
                 
-                <button type="button" class="btn-secondary" onclick="autoBalanceChances()" style="margin-bottom: 20px;">
-                    ⚖️ Авто-баланс шансов
-                </button>
+                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <button type="button" class="btn-secondary" onclick="autoBalanceChances()">
+                        ⚖️ Авто-баланс шансов
+                    </button>
+                    <button type="button" class="btn-secondary" onclick="sortItemsByRarity()">
+                        🔽 Сортировка по редкости
+                    </button>
+                </div>
                 
                 <div class="actions">
                     <button type="submit" class="btn-primary">Сохранить</button>
@@ -916,8 +926,8 @@
                 <div class="card">
                     <div style="display: flex; justify-content: space-between; align-items: start;">
                         <div>
-                            <h3>${c.name}</h3>
-                            <p>ID: <code>${c.id}</code> | Цена: ${c.price} монет</p>
+                            <h3>${c.name} ${c.enabled ? '✅' : '❌'}</h3>
+                            <p>ID: <code>${c.id}</code> | Цена: ${c.price} монет | Статус: ${c.enabled ? '<span style="color: #2ecc71;">Включен</span>' : '<span style="color: #e74c3c;">Выключен</span>'}</p>
                             <div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px;">
                                 ${c.items.map(item => `
                                     <div class="item-tag ${item.rarity}" title="${item.chance}% | ${item.value} монет" style="display: flex; align-items: center; gap: 5px;">
@@ -972,6 +982,7 @@
             document.getElementById('case-id').disabled = !!caseData;
             document.getElementById('case-name').value = caseData?.name || '';
             document.getElementById('case-price').value = caseData?.price || '';
+            document.getElementById('case-enabled').checked = caseData?.enabled ?? false;
             
             renderItems();
             document.getElementById('case-modal').classList.add('active');
@@ -1120,6 +1131,12 @@
             containerEl.classList.add(Math.abs(total - 100) < 0.01 ? 'valid' : 'invalid');
         }
         
+        function sortItemsByRarity() {
+            const rarityOrder = { blue: 0, purple: 1, pink: 2, red: 3, gold: 4, contraband: 5 };
+            currentItems.sort((a, b) => rarityOrder[a.rarity] - rarityOrder[b.rarity]);
+            renderItems();
+        }
+        
         function autoBalanceChances() {
             // CS2 standard distribution
             const distribution = { 
@@ -1178,6 +1195,7 @@
                 id: document.getElementById('case-id').value,
                 name: document.getElementById('case-name').value,
                 price: parseInt(document.getElementById('case-price').value),
+                enabled: document.getElementById('case-enabled').checked,
                 items: currentItems
             };
             

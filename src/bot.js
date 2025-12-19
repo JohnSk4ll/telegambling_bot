@@ -217,7 +217,8 @@ export function setupBot(token) {
     // /кейсы or /cases - List cases
     bot.onText(/\/(кейсы|cases)/, safeHandler(async (msg) => {
         const chatId = msg.chat.id;
-        const cases = storage.getAllCases();
+        const allCases = storage.getAllCases();
+        const cases = allCases.filter(c => c.enabled !== false); // Только включённые
         
         if (cases.length === 0) {
             bot.sendMessage(chatId, '📦 Кейсов пока нет.');
@@ -243,7 +244,8 @@ export function setupBot(token) {
         const caseId = match[2]?.trim();
         
         if (!caseId) {
-            const cases = storage.getAllCases();
+            const allCases = storage.getAllCases();
+            const cases = allCases.filter(c => c.enabled !== false);
             let message = '🔍 Укажите ID кейса для просмотра:\n\n';
             cases.forEach(c => {
                 message += `• \`${c.id}\` - ${c.name}\n`;
@@ -318,7 +320,8 @@ export function setupBot(token) {
         const caseId = match[2]?.trim();
         
         if (!caseId) {
-            const cases = storage.getAllCases();
+            const allCases = storage.getAllCases();
+            const cases = allCases.filter(c => c.enabled !== false);
             let message = '📦 Укажите ID кейса для открытия:\n\n';
             cases.forEach(c => {
                 message += `• \`${c.id}\` - ${c.name} (${c.price} монет)\n`;
@@ -331,6 +334,11 @@ export function setupBot(token) {
         const caseItem = storage.getCase(caseId);
         if (!caseItem) {
             bot.sendMessage(chatId, '❌ Кейс не найден!');
+            return;
+        }
+        
+        if (caseItem.enabled === false) {
+            bot.sendMessage(chatId, '❌ Этот кейс временно недоступен!');
             return;
         }
         
@@ -1115,40 +1123,6 @@ export function setupBot(token) {
             );
         } catch (error) {
             console.error('Failed to notify other user:', error.message);
-        }
-    }));
-
-    // /daily - Daily bonus
-    bot.onText(/\/daily/, safeHandler(async (msg) => {
-        const chatId = msg.chat.id;
-        const user = storage.getUser(msg.from.id);
-        
-        if (!user) {
-            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
-            return;
-        }
-        
-        if (user.banned) {
-            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
-            return;
-        }
-        
-        const result = storage.claimDaily(msg.from.id);
-        
-        if (result.success) {
-            await sendReply(chatId, msg.message_id,
-                `🎁 Ежедневный бонус получен!\n\n` +
-                `💰 +${result.amount} монет\n` +
-                `💵 Ваш баланс: ${result.newBalance} монет\n\n` +
-                `⏰ Следующий бонус через 24 часа`
-            );
-        } else {
-            const hours = result.hoursLeft || 0;
-            const minutes = result.minutesLeft || 0;
-            await sendReply(chatId, msg.message_id,
-                `⏳ ${result.message}\n\n` +
-                `⏰ Следующий бонус через: ${hours}ч ${minutes}м`
-            );
         }
     }));
 
