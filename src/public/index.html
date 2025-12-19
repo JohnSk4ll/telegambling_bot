@@ -670,6 +670,21 @@
             }
         }
 
+        async function resetUser(telegramId) {
+            if (!confirm('Сбросить пользователя до значений по умолчанию? (1000 монет, пустой инвентарь)')) return;
+            try {
+                const res = await fetch(`/api/users/${telegramId}/reset`, { method: 'POST' });
+                if (res.ok) {
+                    showNotification('Пользователь сброшен', 'success');
+                    loadData();
+                } else {
+                    showNotification('Ошибка сброса пользователя', 'error');
+                }
+            } catch (err) {
+                showNotification('Ошибка сброса пользователя', 'error');
+            }
+        }
+
         // Load data
         async function loadData() {
             try {
@@ -934,6 +949,7 @@
                             ? `<button class="btn-primary" onclick="unbanUser(${u.telegramId})">✅ Разбанить</button>`
                             : `<button class="btn-danger" onclick="banUser(${u.telegramId})">🚫 Забанить</button>`
                         }
+                        <button class="btn-secondary" onclick="resetUser(${u.telegramId})" title="Сбросить пользователя">🔄</button>
                     </td>
                 </tr>
             `).join('') || '<tr><td colspan="6">Пользователей пока нет</td></tr>';
@@ -1102,8 +1118,14 @@
         }
         
         function autoBalanceChances() {
-            // Default distribution
-            const distribution = { blue: 50, purple: 25, pink: 15, red: 8, gold: 2 };
+            // CS:GO case rarity distribution (adjusted for rarer high-tier items)
+            const distribution = { 
+                blue: 79.92,    // Mil-Spec (Consumer Grade)
+                purple: 15.98,  // Restricted
+                pink: 3.20,     // Classified
+                red: 0.64,      // Covert
+                gold: 0.26      // Exceedingly Rare (Knife/Gloves)
+            };
             
             // Count items by rarity
             const counts = {};
@@ -1117,7 +1139,7 @@
                 item.chance = parseFloat((distribution[item.rarity] / count).toFixed(2));
             });
             
-            // Adjust for rounding errors
+            // Adjust for rounding errors to ensure exactly 100%
             const total = currentItems.reduce((sum, item) => sum + item.chance, 0);
             if (currentItems.length > 0 && total !== 100) {
                 currentItems[0].chance = parseFloat((currentItems[0].chance + (100 - total)).toFixed(2));

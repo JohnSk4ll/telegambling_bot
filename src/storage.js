@@ -125,6 +125,18 @@ export async function unbanUser(telegramId) {
     return user;
 }
 
+export async function resetUser(telegramId) {
+    const user = getUser(telegramId);
+    if (!user) return null;
+    
+    // Reset to default values
+    user.coins = 1000;
+    user.inventory = [];
+    user.banned = false;
+    await db.write();
+    return user;
+}
+
 // Case functions
 export function getAllCases() {
     return db.data.cases;
@@ -252,34 +264,40 @@ export function rollCase(caseId) {
     }
     if (!selectedItem) selectedItem = caseItem.items[caseItem.items.length - 1];
 
-    // Если у предмета есть вариации, выбираем вариацию по шансам
+    // Если у предмета есть вариации, сначала проверяем шанс получить вариацию (как StatTrak в CS:GO ~10%)
     if (selectedItem.variations && Array.isArray(selectedItem.variations) && selectedItem.variations.length > 0) {
-        const varRand = Math.random() * 100;
-        let varCumulative = 0;
-        let selectedVar = null;
-        for (const v of selectedItem.variations) {
-            varCumulative += Number(v.chance) || 0;
-            if (varRand < varCumulative && !selectedVar) {
-                selectedVar = v;
-                break;
+        const variationRoll = Math.random() * 100;
+        const VARIATION_CHANCE = 10; // 10% шанс получить вариацию (как StatTrak)
+        
+        // Только если выпала вариация, выбираем конкретную
+        if (variationRoll <= VARIATION_CHANCE) {
+            const varRand = Math.random() * 100;
+            let varCumulative = 0;
+            let selectedVar = null;
+            for (const v of selectedItem.variations) {
+                varCumulative += Number(v.chance) || 0;
+                if (varRand <= varCumulative && !selectedVar) {
+                    selectedVar = v;
+                    break;
+                }
             }
+            if (!selectedVar) selectedVar = selectedItem.variations[selectedItem.variations.length - 1];
+            // Возвращаем предмет с вариацией (имя, цена, картинка берутся из вариации)
+            return {
+                ...selectedItem,
+                name: `${selectedItem.name} (${selectedVar.name})`,
+                value: Number(selectedVar.price) || selectedItem.value,
+                image: selectedVar.image || selectedItem.image,
+                variation: {
+                    name: selectedVar.name,
+                    price: selectedVar.price,
+                    image: selectedVar.image,
+                    chance: selectedVar.chance
+                }
+            };
         }
-        if (!selectedVar) selectedVar = selectedItem.variations[selectedItem.variations.length - 1];
-        // Возвращаем предмет с вариацией (имя, цена, картинка берутся из вариации)
-        return {
-            ...selectedItem,
-            name: `${selectedItem.name} (${selectedVar.name})`,
-            value: Number(selectedVar.price) || selectedItem.value,
-            image: selectedVar.image || selectedItem.image,
-            variation: {
-                name: selectedVar.name,
-                price: selectedVar.price,
-                image: selectedVar.image,
-                chance: selectedVar.chance
-            }
-        };
     }
-    // Если вариаций нет, возвращаем обычный предмет
+    // Если вариаций нет или не выпала вариация, возвращаем обычный предмет
     return selectedItem;
 }
 

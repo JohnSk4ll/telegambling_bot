@@ -83,20 +83,20 @@ export function setupBot(token) {
         });
     };
     
-    // Хелпер для упоминания пользователя (создаёт кликабельное упоминание)
+    // Хелпер для упоминания пользователя (создаёт @username)
     const mentionUser = (userOrMsg) => {
         if (!userOrMsg) return 'пользователь';
         
         // Если это объект сообщения (с msg.from)
         if (userOrMsg.from) {
-            const name = userOrMsg.from.first_name || userOrMsg.from.username || 'пользователь';
-            const userId = userOrMsg.from.id;
-            return `[${name}](tg://user?id=${userId})`;
+            const username = userOrMsg.from.username;
+            if (username) return `@${username}`;
+            return userOrMsg.from.first_name || 'пользователь';
         }
         // Если это объект пользователя из базы данных
-        const name = userOrMsg.firstName || userOrMsg.username || 'пользователь';
-        const userId = userOrMsg.telegramId;
-        return `[${name}](tg://user?id=${userId})`;
+        const username = userOrMsg.username;
+        if (username) return `@${username}`;
+        return userOrMsg.firstName || 'пользователь';
     };
     
     // Обертка для безопасной обработки команд
@@ -615,7 +615,7 @@ export function setupBot(token) {
         }
         
         if (amount > opponent.coins) {
-            await sendReply(chatId, msg.message_id, `❌ У ${mentionUser(opponent)} недостаточно монет!`);
+            await sendReply(chatId, msg.message_id, `❌ У ${mentionUser(opponent)} недостаточно монет!`, { parse_mode: 'Markdown' });
             return;
         }
         

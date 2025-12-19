@@ -112,6 +112,15 @@ export function setupServer(port = 5051) {
         }
         res.json(user);
     });
+
+    // Reset user to default values
+    app.post('/api/users/:telegramId/reset', async (req, res) => {
+        const user = await storage.resetUser(parseInt(req.params.telegramId));
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    });
     
     // Add item to user inventory
     app.post('/api/users/:telegramId/inventory', async (req, res) => {
