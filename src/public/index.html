@@ -1033,7 +1033,7 @@
                         ${item.variations.map((v,i)=>`
                             <li style='margin-bottom:8px;display:flex;align-items:center;gap:8px;'>
                                 <input type='text' placeholder='Название' style='width:120px;' value='${v.name || ''}' onchange='updateVariation(${index},${i},"name",this.value)'>
-                                <input type='number' placeholder='Шанс' style='width:60px;' value='${v.chance || 0}' min='0' max='100' onchange='updateVariation(${index},${i},"chance",parseFloat(this.value))'>
+                                <input type='number' placeholder='Шанс' style='width:70px;' value='${v.chance || 0}' min='0' max='100' step='0.01' onchange='updateVariation(${index},${i},"chance",parseFloat(this.value))'>
                                 <input type='number' placeholder='Цена' style='width:80px;' value='${v.price || 0}' min='0' onchange='updateVariation(${index},${i},"price",parseFloat(this.value))'>
                                 <input type='text' placeholder='Картинка (url)' style='width:180px;' value='${v.image || ''}' onchange='updateVariation(${index},${i},"image",this.value)'>
                                 ${v.image ? `<img src='${v.image}' style='width:24px;height:24px;object-fit:cover;vertical-align:middle;border-radius:3px;'>` : ''}

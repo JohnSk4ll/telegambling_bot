@@ -4,6 +4,113 @@ import * as storage from './storage.js';
 export function setupBot(token) {
     const bot = new TelegramBot(token, { polling: true });
     
+    // Очистка буфера сообщений при старте с retry logic
+    const clearBuffer = async () => {
+        try {
+            await bot.getUpdates({ offset: -1 });
+            console.log('Message buffer cleared');
+        } catch (error) {
+            if (error.response && error.response.body && error.response.body.parameters) {
+                const retryAfter = error.response.body.parameters.retry_after;
+                if (retryAfter) {
+                    console.log(`Rate limited while clearing buffer. Retrying after ${retryAfter} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000 + 500));
+                    await bot.getUpdates({ offset: -1 });
+                    console.log('Message buffer cleared');
+                    return;
+                }
+            }
+            console.error('Failed to clear message buffer:', error.message);
+        }
+    };
+    clearBuffer();
+    
+    // Глобальная обработка ошибок polling
+    bot.on('polling_error', (error) => {
+        console.error('Polling error:', error);
+    });
+    
+    // Обработка ошибок при отправке сообщений (включая 429)
+    const originalSendMessage = bot.sendMessage.bind(bot);
+    const originalSendPhoto = bot.sendPhoto.bind(bot);
+    
+    bot.sendMessage = async (chatId, text, options = {}) => {
+        try {
+            return await originalSendMessage(chatId, text, options);
+        } catch (error) {
+            if (error.response && error.response.body && error.response.body.parameters) {
+                const retryAfter = error.response.body.parameters.retry_after;
+                if (retryAfter) {
+                    console.log(`Rate limited. Retrying after ${retryAfter} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000 + 500));
+                    return await originalSendMessage(chatId, text, options);
+                }
+            }
+            console.error('Error sending message:', error.message);
+            throw error;
+        }
+    };
+    
+    bot.sendPhoto = async (chatId, photo, options = {}) => {
+        try {
+            return await originalSendPhoto(chatId, photo, options);
+        } catch (error) {
+            if (error.response && error.response.body && error.response.body.parameters) {
+                const retryAfter = error.response.body.parameters.retry_after;
+                if (retryAfter) {
+                    console.log(`Rate limited. Retrying after ${retryAfter} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000 + 500));
+                    return await originalSendPhoto(chatId, photo, options);
+                }
+            }
+            console.error('Error sending photo:', error.message);
+            throw error;
+        }
+    };
+    
+    // Хелпер для отправки сообщения с reply
+    const sendReply = (chatId, messageId, text, options = {}) => {
+        return bot.sendMessage(chatId, text, {
+            ...options,
+            reply_to_message_id: messageId
+        });
+    };
+    
+    const sendPhotoReply = (chatId, messageId, photo, options = {}) => {
+        return bot.sendPhoto(chatId, photo, {
+            ...options,
+            reply_to_message_id: messageId
+        });
+    };
+    
+    // Хелпер для упоминания пользователя (создаёт кликабельное упоминание)
+    const mentionUser = (userOrMsg) => {
+        if (!userOrMsg) return 'пользователь';
+        
+        // Если это объект сообщения (с msg.from)
+        if (userOrMsg.from) {
+            const name = userOrMsg.from.first_name || userOrMsg.from.username || 'пользователь';
+            const userId = userOrMsg.from.id;
+            return `[${name}](tg://user?id=${userId})`;
+        }
+        // Если это объект пользователя из базы данных
+        const name = userOrMsg.firstName || userOrMsg.username || 'пользователь';
+        const userId = userOrMsg.telegramId;
+        return `[${name}](tg://user?id=${userId})`;
+    };
+    
+    // Обертка для безопасной обработки команд
+    const safeHandler = (handler) => async (msg, match) => {
+        try {
+            await handler(msg, match);
+        } catch (error) {
+            console.error('Error in command handler:', error);
+            const chatId = msg.chat.id;
+            const userName = mentionUser(msg);
+            sendReply(chatId, msg.message_id, `❌ ${userName}, произошла ошибка при обработке команды. Попробуйте позже.`).catch(() => {});
+        }
+    };
+    
     // Set bot commands (must use Latin characters only)
     bot.setMyCommands([
         { command: 'connect', description: 'Зарегистрироваться в боте (/подключиться)' },
@@ -14,79 +121,84 @@ export function setupBot(token) {
         { command: 'inventory', description: 'Инвентарь (/инвентарь)' },
         { command: 'sell', description: 'Продать предмет (/продать [id])' },
         { command: 'promocode', description: 'Активировать промокод (/промокод <код>)' },
+        { command: 'cointoss', description: 'Игра в монетку 50/50 (/cointoss @user сумма)' },
         { command: 'trade', description: 'Обмен (/обмен)' },
         { command: 'trades', description: 'Входящие обмены (/обмены)' },
         { command: 'help', description: 'Справка (/помощь)' }
     ]);
         // /промокод or /promocode - Redeem promo code
-        bot.onText(/\/(промокод|promocode)(?:\s+(.+))?/i, async (msg, match) => {
+        bot.onText(/\/(промокод|promocode)(?:\s+(.+))?/i, safeHandler(async (msg, match) => {
             const chatId = msg.chat.id;
+            const userName = mentionUser(msg);
             const user = storage.getUser(msg.from.id);
             if (!user) {
-                bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+                sendReply(chatId, msg.message_id, `❌ ${userName}, вы не зарегистрированы! Используйте /подключиться`);
                 return;
             }
             if (user.banned) {
-                bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+                sendReply(chatId, msg.message_id, `🚫 ${userName}, вы заблокированы и не можете использовать бота.`);
                 return;
             }
             const code = match[2]?.trim();
             if (!code) {
-                bot.sendMessage(chatId, 'Введите промокод после команды.\nПример: /промокод NEWYEAR2025');
+                sendReply(chatId, msg.message_id, `${userName}, введите промокод после команды.\nПример: /промокод NEWYEAR2025`);
                 return;
             }
             const result = await storage.redeemPromo(msg.from.id, code);
             if (result.success) {
-                bot.sendMessage(chatId, `✅ Промокод активирован!\n\n💰 Вы получили: ${result.amount} монет`);
+                sendReply(chatId, msg.message_id, `✅ ${userName}, промокод активирован!\n\n💰 Вы получили: ${result.amount} монет`);
             } else {
-                bot.sendMessage(chatId, `❌ ${result.message}`);
+                sendReply(chatId, msg.message_id, `❌ ${userName}, ${result.message}`);
             }
-        });
+        }));
     
     // /подключиться or /connect - Register
-    bot.onText(/\/(подключиться|connect)/, async (msg) => {
+    bot.onText(/\/(подключиться|connect)/, safeHandler(async (msg) => {
         const chatId = msg.chat.id;
         const telegramId = msg.from.id;
         const username = msg.from.username;
         const firstName = msg.from.first_name;
+        const userName = mentionUser(msg);
         
         const result = await storage.createUser(telegramId, username, firstName);
         
         if (result.success) {
-            bot.sendMessage(chatId, 
-                `🎰 Добро пожаловать, ${firstName}!\n\n` +
+            sendReply(chatId, msg.message_id,
+                `🎰 Добро пожаловать, ${userName}!\n\n` +
                 `Вы успешно зарегистрировались!\n` +
                 `💰 Ваш начальный баланс: 1000 монет\n\n` +
                 `Используйте /помощь для просмотра команд.`
             );
         } else {
-            bot.sendMessage(chatId, `❌ ${result.message}`);
+            sendReply(chatId, msg.message_id, `❌ ${userName}, ${result.message}`);
         }
-    });
+    }));
     
     // /баланс or /balance - Check balance
-    bot.onText(/\/(баланс|balance)/, (msg) => {
+    bot.onText(/\/(баланс|balance)/, safeHandler(async (msg) => {
         const chatId = msg.chat.id;
+        const userName = mentionUser(msg);
         const user = storage.getUser(msg.from.id);
         
         if (!user) {
-            bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            sendReply(chatId, msg.message_id, `❌ ${userName}, вы не зарегистрированы! Используйте /подключиться`);
             return;
         }
         
         if (user.banned) {
-            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+            sendReply(chatId, msg.message_id, `🚫 ${userName}, вы заблокированы и не можете использовать бота.`);
             return;
         }
         
-        bot.sendMessage(chatId,
-            `💰 Ваш баланс: ${user.coins} монет\n` +
+        sendReply(chatId, msg.message_id,
+            `${userName}, ваш баланс:\n` +
+            `💰 Монеты: ${user.coins}\n` +
             `📦 Предметов в инвентаре: ${user.inventory.length}`
         );
-    });
+    }));
     
     // /кейсы or /cases - List cases
-    bot.onText(/\/(кейсы|cases)/, (msg) => {
+    bot.onText(/\/(кейсы|cases)/, safeHandler(async (msg) => {
         const chatId = msg.chat.id;
         const cases = storage.getAllCases();
         
@@ -106,10 +218,10 @@ export function setupBot(token) {
         message += `Для просмотра содержимого: /просмотр [id]`;
         
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-    });
+    }));
 
     // /просмотр or /view - View case contents
-    bot.onText(/\/(просмотр|view)(?:\s+(.+))?/, (msg, match) => {
+    bot.onText(/\/(просмотр|view)(?:\s+(.+))?/, safeHandler(async (msg, match) => {
         const chatId = msg.chat.id;
         const caseId = match[2]?.trim();
         
@@ -168,20 +280,21 @@ export function setupBot(token) {
         });
         
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-    });
+    }));
     
     // /открыть or /open - Open case
-    bot.onText(/\/(открыть|open)(?:\s+(.+))?/, async (msg, match) => {
+    bot.onText(/\/(открыть|open)(?:\s+(.+))?/, safeHandler(async (msg, match) => {
         const chatId = msg.chat.id;
+        const userName = mentionUser(msg);
         const user = storage.getUser(msg.from.id);
         
         if (!user) {
-            bot.sendMessage(chatId, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            bot.sendMessage(chatId, `❌ ${userName}, вы не зарегистрированы! Используйте /подключиться`);
             return;
         }
         
         if (user.banned) {
-            bot.sendMessage(chatId, '🚫 Вы заблокированы и не можете использовать бота.');
+            bot.sendMessage(chatId, `🚫 ${userName}, вы заблокированы и не можете использовать бота.`);
             return;
         }
         
@@ -247,6 +360,7 @@ export function setupBot(token) {
         }
 
         const messageText =
+            `${userName}:\n` +
             `🎰 Вы открыли ${escapeMarkdown(caseItem.name)}!\n\n` +
             `${rarityEmojis[wonItem.rarity] || '🎁'} Вы выиграли: ${escapeMarkdown(wonItem.name)}\n` +
             `📊 Редкость: ${escapeMarkdown(rarityNames[wonItem.rarity] || wonItem.rarity)}\n` +
@@ -277,7 +391,7 @@ export function setupBot(token) {
         } else {
             bot.sendMessage(chatId, messageText, { parse_mode: 'Markdown' });
         }
-    });
+    }));
     
     // /инвентарь or /inventory - View inventory
     bot.onText(/\/(инвентарь|inventory)/, (msg) => {
@@ -425,6 +539,276 @@ export function setupBot(token) {
             { parse_mode: 'Markdown' }
         );
     });
+
+    // /cointoss - Create coin toss challenge
+    // Format: /cointoss @username amount
+    bot.onText(/\/cointoss(?:\s+(.+))?/, safeHandler(async (msg, match) => {
+        const chatId = msg.chat.id;
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
+        const args = match[1]?.trim();
+        
+        if (!args) {
+            await sendReply(chatId, msg.message_id,
+                `🪙 **Орёл и решка**\n\n` +
+                `Формат команды:\n` +
+                `/cointoss @username сумма\n\n` +
+                `Игра 50/50 на монеты. Победитель забирает всё!\n\n` +
+                `Пример:\n` +
+                `/cointoss @player 100\n\n` +
+                `Используйте:\n` +
+                `• /tosses - посмотреть входящие вызовы\n` +
+                `• /accept ID - принять вызов\n` +
+                `• /decline ID - отклонить вызов`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+        
+        // Parse username and amount
+        const parts = args.split(/\s+/);
+        if (parts.length < 2) {
+            await sendReply(chatId, msg.message_id, '❌ Неверный формат! Используйте: /cointoss @username сумма');
+            return;
+        }
+        
+        let username = parts[0].replace('@', '');
+        const amount = parseInt(parts[1]);
+        
+        if (isNaN(amount) || amount <= 0) {
+            await sendReply(chatId, msg.message_id, '❌ Укажите корректную сумму!');
+            return;
+        }
+        
+        if (amount > user.coins) {
+            await sendReply(chatId, msg.message_id, `❌ У вас недостаточно монет! Ваш баланс: ${user.coins}`);
+            return;
+        }
+        
+        // Find opponent by username
+        const allUsers = storage.getAllUsers();
+        const opponent = allUsers.find(u => u.username && u.username.toLowerCase() === username.toLowerCase());
+        
+        if (!opponent) {
+            await sendReply(chatId, msg.message_id, '❌ Игрок не найден! Убедитесь, что он использовал команду /подключиться');
+            return;
+        }
+        
+        if (opponent.telegramId === msg.from.id) {
+            await sendReply(chatId, msg.message_id, '❌ Нельзя вызвать самого себя!');
+            return;
+        }
+        
+        if (opponent.banned) {
+            await sendReply(chatId, msg.message_id, '❌ Этот игрок заблокирован.');
+            return;
+        }
+        
+        if (amount > opponent.coins) {
+            await sendReply(chatId, msg.message_id, `❌ У ${mentionUser(opponent)} недостаточно монет!`);
+            return;
+        }
+        
+        // Create coin toss
+        const toss = await storage.createCoinToss(msg.from.id, opponent.telegramId, amount);
+        
+        await sendReply(chatId, msg.message_id,
+            `🪙 Вызов отправлен!\n\n` +
+            `${mentionUser(msg)} бросает вызов ${mentionUser(opponent)}\n` +
+            `💰 Ставка: ${amount} монет\n` +
+            `🆔 ID вызова: ${toss.id}\n\n` +
+            `Ожидаем ответа...`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        // Notify opponent
+        try {
+            await bot.sendMessage(opponent.telegramId,
+                `🪙 **Входящий вызов!**\n\n` +
+                `${mentionUser(msg)} вызывает вас на орёл и решку!\n` +
+                `💰 Ставка: ${amount} монет\n` +
+                `🆔 ID: ${toss.id}\n\n` +
+                `Используйте:\n` +
+                `• /accept ${toss.id} - принять вызов\n` +
+                `• /decline ${toss.id} - отклонить вызов\n\n` +
+                `Победитель забирает ${amount * 2} монет!`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('Failed to notify opponent:', error.message);
+        }
+    }));
+
+    // /tosses - View pending coin tosses
+    bot.onText(/\/tosses/, safeHandler(async (msg) => {
+        const chatId = msg.chat.id;
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
+        const tosses = storage.getCoinTossesForUser(msg.from.id);
+        
+        if (tosses.length === 0) {
+            await sendReply(chatId, msg.message_id, '📭 У вас нет входящих вызовов.');
+            return;
+        }
+        
+        let message = '🪙 **Входящие вызовы:**\n\n';
+        
+        for (const toss of tosses) {
+            const challenger = storage.getUser(toss.challengerId);
+            if (challenger) {
+                message += `🆔 ID: ${toss.id}\n`;
+                message += `👤 От: ${mentionUser(challenger)}\n`;
+                message += `💰 Ставка: ${toss.amount} монет\n`;
+                message += `📅 ${new Date(toss.createdAt).toLocaleString('ru-RU')}\n\n`;
+            }
+        }
+        
+        message += `Используйте /accept ID или /decline ID`;
+        
+        await sendReply(chatId, msg.message_id, message, { parse_mode: 'Markdown' });
+    }));
+
+    // /accept - Accept coin toss
+    bot.onText(/\/accept(?:\s+(.+))?/, safeHandler(async (msg, match) => {
+        const chatId = msg.chat.id;
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
+        const tossId = match[1]?.trim();
+        
+        if (!tossId) {
+            await sendReply(chatId, msg.message_id, '❌ Укажите ID вызова! Используйте: /accept ID\n\nСмотрите /tosses для списка вызовов');
+            return;
+        }
+        
+        const toss = storage.getCoinTossById(tossId);
+        
+        if (!toss) {
+            await sendReply(chatId, msg.message_id, '❌ Вызов не найден!');
+            return;
+        }
+        
+        if (toss.opponentId !== msg.from.id) {
+            await sendReply(chatId, msg.message_id, '❌ Это не ваш вызов!');
+            return;
+        }
+        
+        // Execute coin toss
+        const result = await storage.executeCoinToss(tossId);
+        
+        if (!result.success) {
+            await sendReply(chatId, msg.message_id, `❌ Ошибка: ${result.error}`);
+            return;
+        }
+        
+        const challenger = storage.getUser(toss.challengerId);
+        const opponent = storage.getUser(toss.opponentId);
+        const winner = storage.getUser(result.winnerId);
+        const loser = storage.getUser(result.loserId);
+        
+        const resultMessage =
+            `🪙 **Орёл и решка!**\n\n` +
+            `${mentionUser(challenger)} VS ${mentionUser(opponent)}\n` +
+            `💰 Ставка: ${toss.amount} монет каждый\n\n` +
+            `🎲 Подбрасываем монетку...\n\n` +
+            `${result.isHeads ? '🔵 Орёл!' : '⚫ Решка!'}\n\n` +
+            `🏆 Победитель: ${mentionUser(winner)}\n` +
+            `💸 Проигравший: ${mentionUser(loser)}\n\n` +
+            `✅ ${mentionUser(winner)} получает ${toss.amount * 2} монет!`;
+        
+        await sendReply(chatId, msg.message_id, resultMessage, { parse_mode: 'Markdown' });
+        
+        // Notify challenger
+        if (toss.challengerId !== msg.from.id) {
+            try {
+                await bot.sendMessage(toss.challengerId, resultMessage, { parse_mode: 'Markdown' });
+            } catch (error) {
+                console.error('Failed to notify challenger:', error.message);
+            }
+        }
+    }));
+
+    // /decline - Decline coin toss
+    bot.onText(/\/decline(?:\s+(.+))?/, safeHandler(async (msg, match) => {
+        const chatId = msg.chat.id;
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            await sendReply(chatId, msg.message_id, '❌ Вы не зарегистрированы! Используйте /подключиться');
+            return;
+        }
+        
+        if (user.banned) {
+            await sendReply(chatId, msg.message_id, '🚫 Вы заблокированы и не можете использовать бота.');
+            return;
+        }
+        
+        const tossId = match[1]?.trim();
+        
+        if (!tossId) {
+            await sendReply(chatId, msg.message_id, '❌ Укажите ID вызова! Используйте: /decline ID');
+            return;
+        }
+        
+        const toss = storage.getCoinTossById(tossId);
+        
+        if (!toss) {
+            await sendReply(chatId, msg.message_id, '❌ Вызов не найден!');
+            return;
+        }
+        
+        if (toss.opponentId !== msg.from.id && toss.challengerId !== msg.from.id) {
+            await sendReply(chatId, msg.message_id, '❌ Это не ваш вызов!');
+            return;
+        }
+        
+        const challenger = storage.getUser(toss.challengerId);
+        const opponent = storage.getUser(toss.opponentId);
+        
+        storage.cancelCoinToss(tossId);
+        
+        await sendReply(chatId, msg.message_id, '❌ Вызов отклонён.');
+        
+        // Notify the other party
+        const otherUserId = toss.opponentId === msg.from.id ? toss.challengerId : toss.opponentId;
+        try {
+            await bot.sendMessage(otherUserId,
+                `❌ ${mentionUser(user)} отклонил вызов на орёл и решку (${toss.amount} монет)`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('Failed to notify other user:', error.message);
+        }
+    }));
     
     // /обмен or /trade - Create trade
     // Format: /обмен @username мои_предметы:id1,id2 их_предметы:id1,id2 мои_монеты:100 их_монеты:50

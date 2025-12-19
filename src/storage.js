@@ -36,7 +36,13 @@ export async function updateUserCoins(telegramId, amount) {
     const user = getUser(telegramId);
     if (!user) return null;
     
-    user.coins += amount;
+    const newBalance = user.coins + amount;
+    // Предотвращаем отрицательный баланс
+    if (newBalance < 0) {
+        return null;
+    }
+    
+    user.coins = newBalance;
     await db.write();
     return user;
 }
@@ -44,6 +50,11 @@ export async function updateUserCoins(telegramId, amount) {
 export async function setUserCoins(telegramId, amount) {
     const user = getUser(telegramId);
     if (!user) return null;
+    
+    // Предотвращаем отрицательный баланс
+    if (amount < 0) {
+        return null;
+    }
     
     user.coins = amount;
     await db.write();
@@ -385,6 +396,90 @@ export async function cancelTrade(tradeId) {
     if (!trade) return false;
     
     trade.status = 'cancelled';
+    await db.write();
+    return true;
+}
+
+// Coin Toss functions
+export function getAllCoinTosses() {
+    if (!Array.isArray(db.data.coinTosses)) db.data.coinTosses = [];
+    return db.data.coinTosses;
+}
+
+export function getCoinTossesForUser(telegramId) {
+    if (!Array.isArray(db.data.coinTosses)) db.data.coinTosses = [];
+    return db.data.coinTosses.filter(ct => ct.challengedUserId === telegramId && ct.status === 'pending');
+}
+
+export function getCoinTossById(coinTossId) {
+    if (!Array.isArray(db.data.coinTosses)) db.data.coinTosses = [];
+    return db.data.coinTosses.find(ct => ct.id === coinTossId);
+}
+
+export async function createCoinToss(challengerId, opponentId, amount) {
+    if (!Array.isArray(db.data.coinTosses)) db.data.coinTosses = [];
+    
+    const coinToss = {
+        id: Date.now().toString(),
+        challengerId,
+        opponentId,
+        amount,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+    };
+    
+    db.data.coinTosses.push(coinToss);
+    await db.write();
+    return coinToss;
+}
+
+export async function executeCoinToss(coinTossId) {
+    const coinToss = getCoinTossById(coinTossId);
+    if (!coinToss || coinToss.status !== 'pending') {
+        return { success: false, error: 'Игра не найдена или уже завершена' };
+    }
+
+    const challenger = getUser(coinToss.challengerId);
+    const challenged = getUser(coinToss.opponentId);
+    
+    if (!challenger || !challenged) {
+        return { success: false, error: 'Один из игроков не найден' };
+    }
+
+    if (challenger.coins < coinToss.amount || challenged.coins < coinToss.amount) {
+        return { success: false, error: 'У одного из игроков недостаточно монет' };
+    }
+    
+    // Подбрасываем монетку (50/50)
+    const winnerIsChallenger = Math.random() < 0.5;
+    const winner = winnerIsChallenger ? challenger : challenged;
+    const loser = winnerIsChallenger ? challenged : challenger;
+    
+    // Списываем ставки и отдаём выигрыш
+    challenger.coins -= coinToss.amount;
+    challenged.coins -= coinToss.amount;
+    winner.coins += coinToss.amount * 2;
+    
+    coinToss.status = 'completed';
+    coinToss.winnerId = winner.telegramId;
+    coinToss.completedAt = new Date().toISOString();
+    
+    await db.write();
+    
+    return { 
+        success: true, 
+        coinToss, 
+        winner,
+        loser,
+        winnerIsChallenger 
+    };
+}
+
+export async function cancelCoinToss(coinTossId) {
+    const coinToss = getCoinTossById(coinTossId);
+    if (!coinToss) return false;
+    
+    coinToss.status = 'cancelled';
     await db.write();
     return true;
 }
