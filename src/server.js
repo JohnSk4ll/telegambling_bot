@@ -295,11 +295,11 @@ export function setupServer(port = 5051) {
         
         // Default rarity distribution (CS2 standard)
         const rarityChances = {
-            blue: 79.92,     // 79.92% total for blue (Mil-Spec)
+            blue: 80.07,     // 80.07% total for blue (Mil-Spec)
             purple: 15.98,   // 15.98% total for purple (Restricted)
             pink: 3.20,      // 3.20% total for pink (Classified)
             red: 0.64,       // 0.64% total for red (Covert)
-            gold: 0.25,      // 0.25% total for gold (Special Items)
+            gold: 0.1,       // 0.1% total for gold (Special Items)
             contraband: 0.01 // 0.01% total for contraband
         };
         

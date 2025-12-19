@@ -174,6 +174,7 @@
         .rarity-pink { color: #ff69b4; }
         .rarity-red { color: #e74c3c; }
         .rarity-gold { color: #ffd700; }
+        .rarity-contraband { color: #ff4500; }
         
         .item-tag {
             display: inline-block;
@@ -188,6 +189,7 @@
         .item-tag.pink { background: rgba(255, 105, 180, 0.3); border: 1px solid #ff69b4; }
         .item-tag.red { background: rgba(231, 76, 60, 0.3); border: 1px solid #e74c3c; }
         .item-tag.gold { background: rgba(255, 215, 0, 0.3); border: 1px solid #ffd700; }
+        .item-tag.contraband { background: rgba(255, 69, 0, 0.3); border: 1px solid #ff4500; }
         
         .modal {
             display: none;
@@ -489,6 +491,7 @@
                     <button type="button" class="btn-secondary" onclick="addItem('pink')">+ 🩷 Розовый</button>
                     <button type="button" class="btn-secondary" onclick="addItem('red')">+ 🔴 Красный</button>
                     <button type="button" class="btn-secondary" onclick="addItem('gold')">+ 🌟 Золотой</button>
+                    <button type="button" class="btn-secondary" onclick="addItem('contraband')">+ ❗ Контрабанда</button>
                 </div>
                 
                 <button type="button" class="btn-secondary" onclick="autoBalanceChances()" style="margin-bottom: 20px;">
@@ -979,9 +982,9 @@
         }
         
         function addItem(rarity) {
-            const rarityNames = { blue: 'Синий', purple: 'Фиолетовый', pink: 'Розовый', red: 'Красный', gold: 'Золотой' };
-            const rarityEmojis = { blue: '🔵', purple: '🟣', pink: '🩷', red: '🔴', gold: '🌟' };
-            const defaultValues = { blue: 50, purple: 150, pink: 300, red: 600, gold: 2000 };
+            const rarityNames = { blue: 'Синий', purple: 'Фиолетовый', pink: 'Розовый', red: 'Красный', gold: 'Золотой', contraband: 'Контрабанда' };
+            const rarityEmojis = { blue: '🔵', purple: '🟣', pink: '🩷', red: '🔴', gold: '🌟', contraband: '❗' };
+            const defaultValues = { blue: 50, purple: 150, pink: 300, red: 600, gold: 2000, contraband: 10000 };
             
             currentItems.push({
                 id: `${rarity}_${++itemCounter}`,
@@ -1118,13 +1121,14 @@
         }
         
         function autoBalanceChances() {
-            // CS:GO-like distribution: purple boosted to 22%, blue reduced
+            // CS2 standard distribution
             const distribution = { 
-                blue: 72.78,    // Most common (reduced to give to purple)
-                purple: 22.00,  // Boosted from 15.80%
-                pink: 3.15,     // Rare (like CS:GO Classified)
-                red: 1.28,      // Very rare (doubled from 0.64%)
-                gold: 0.79      // Extremely rare (tripled from 0.26%)
+                blue: 80.07,    // Most common (Mil-Spec)
+                purple: 15.98,  // Restricted
+                pink: 3.20,     // Classified
+                red: 0.64,      // Covert
+                gold: 0.1,      // Special Items
+                contraband: 0.01 // Contraband
             };
             
             // Count items by rarity
@@ -1252,6 +1256,7 @@
                                 <option value="pink" ${item.rarity === 'pink' ? 'selected' : ''}>🩷 Розовый</option>
                                 <option value="red" ${item.rarity === 'red' ? 'selected' : ''}>🔴 Красный</option>
                                 <option value="gold" ${item.rarity === 'gold' ? 'selected' : ''}>🌟 Золотой</option>
+                                <option value="contraband" ${item.rarity === 'contraband' ? 'selected' : ''}>❗ Контрабанда</option>
                             </select>
                         </div>
                         <div>
