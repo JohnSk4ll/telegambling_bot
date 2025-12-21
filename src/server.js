@@ -31,6 +31,9 @@ export function setupServer(port = 5051) {
                 username: u.username || '',
                 firstName: u.firstName || '',
                 coins: Number(u.coins) || 0,
+                xp: Number(u.xp) || 0,
+                level: Number(u.level) || 1,
+                earnedMilestones: Number(u.earnedMilestones) || 0,
                 inventory: (u.inventory && u.inventory.item ? (Array.isArray(u.inventory.item) ? u.inventory.item : [u.inventory.item]) : []).map(it => ({
                     name: it.name || '',
                     value: Number(it.value) || 0,
@@ -63,6 +66,7 @@ export function setupServer(port = 5051) {
                     id: c.id,
                     name: c.name,
                     price: Number(c.price) || 0,
+                    xpReward: Number(c.xpReward) || 10,
                     items: items.map(it => {
                         const item = {
                             id: it.id,
@@ -203,6 +207,44 @@ export function setupServer(port = 5051) {
             return res.status(404).json({ error: 'Item not found' });
         }
         res.json({ success: true, removed });
+    });
+    
+    // ============ SETTINGS ENDPOINTS ============
+    
+    // Get settings
+    app.get('/api/settings', (req, res) => {
+        const settings = storage.getSettings();
+        res.json(settings);
+    });
+    
+    // Update settings
+    app.patch('/api/settings', async (req, res) => {
+        try {
+            const settings = await storage.updateSettings(req.body);
+            res.json(settings);
+        } catch (err) {
+            res.status(500).json({ error: 'Failed to update settings' });
+        }
+    });
+    
+    // Add level reward
+    app.post('/api/settings/level-rewards', async (req, res) => {
+        try {
+            const settings = await storage.addLevelReward(req.body);
+            res.json(settings);
+        } catch (err) {
+            res.status(500).json({ error: 'Failed to add level reward' });
+        }
+    });
+    
+    // Remove level reward
+    app.delete('/api/settings/level-rewards/:level', async (req, res) => {
+        try {
+            const settings = await storage.removeLevelReward(parseInt(req.params.level));
+            res.json(settings);
+        } catch (err) {
+            res.status(500).json({ error: 'Failed to remove level reward' });
+        }
     });
     
     // ============ CASE ENDPOINTS ============

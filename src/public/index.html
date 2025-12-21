@@ -348,6 +348,7 @@
             <button class="tab active" data-tab="cases">📦 Кейсы</button>
             <button class="tab" data-tab="promos">🏷️ Промокоды</button>
             <button class="tab" data-tab="users">👥 Пользователи</button>
+            <button class="tab" data-tab="settings">⚙️ Настройки</button>
         </div>
         
         <!-- Cases Panel -->
@@ -434,8 +435,107 @@
                 <tbody id="users-tbody"></tbody>
             </table>
         </div>
+        
+        <!-- Settings Panel -->
+        <div class="panel" id="settings-panel">
+            <h2 style="margin-bottom: 20px;">Настройки бота</h2>
+            
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0;">🎁 Награды за уровни</h3>
+                    <button class="btn-primary" onclick="openAddRewardModal()" style="padding: 10px 20px;">
+                        <span style="font-size: 18px;">+</span> Добавить награду
+                    </button>
+                </div>
+                
+                <div id="levelRewardsList" style="display: grid; gap: 12px;"></div>
+                
+                <div id="noRewardsMessage" style="display: none; text-align: center; padding: 40px; color: #666;">
+                    <div style="font-size: 48px; margin-bottom: 10px;">🎁</div>
+                    <p style="font-size: 16px;">Наград пока нет</p>
+                    <p style="font-size: 14px; color: #888;">Нажмите "Добавить награду" чтобы создать первую награду</p>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top: 20px;">
+                <h3>📊 Информация о системе уровней</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
+                    <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #ffd700;">
+                        <div style="font-size: 20px; margin-bottom: 5px;">⭐</div>
+                        <div style="font-weight: bold; margin-bottom: 5px;">Прогресс уровня</div>
+                        <div style="color: #aaa; font-size: 14px;">100 XP = 1 уровень</div>
+                    </div>
+                    <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #4ade80;">
+                        <div style="font-size: 20px; margin-bottom: 5px;">💰</div>
+                        <div style="font-weight: bold; margin-bottom: 5px;">Бонус за заработок</div>
+                        <div style="color: #aaa; font-size: 14px;">Первые 5x: 20 XP за 10k монет<br>Потом: 5 XP за 10k монет</div>
+                    </div>
+                    <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #f59e0b;">
+                        <div style="font-size: 20px; margin-bottom: 5px;">📦</div>
+                        <div style="font-weight: bold; margin-bottom: 5px;">XP за кейсы</div>
+                        <div style="color: #aaa; font-size: 14px;">Настраивается для каждого кейса отдельно</div>
+                    </div>
+                    <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #8b5cf6;">
+                        <div style="font-size: 20px; margin-bottom: 5px;">🎰</div>
+                        <div style="font-weight: bold; margin-bottom: 5px;">Мульти-открытие</div>
+                        <div style="color: #aaa; font-size: 14px;">Награда увеличивает лимит открытия кейсов</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
+    <!-- Level Reward Modal -->
+
+    <!-- Add Reward Modal -->
+    <div id="addRewardModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; z-index:1000; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding:30px; border-radius:16px; max-width:600px; width:100%; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);">
+            <h3 style="margin-bottom:25px; color:#ffd700; font-size: 24px; display: flex; align-items: center; gap: 10px;">
+                <span>🎁</span> Добавить награду за уровень
+            </h3>
+            
+            <!-- Level Range -->
+            <div style="margin-bottom:20px;">
+                <label style="display:block; margin-bottom:8px; color:#ffd700; font-weight:bold;">Уровни:</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div style="flex: 1;">
+                        <input type="number" id="rewardLevelFrom" min="1" placeholder="От" style="width:100%; padding:10px; background:#0f1419; border:2px solid #333; border-radius:8px; color:#fff; font-size:16px;" />
+                    </div>
+                    <span style="color: #666; font-weight: bold;">—</span>
+                    <div style="flex: 1;">
+                        <input type="number" id="rewardLevelTo" min="1" placeholder="До (опционально)" style="width:100%; padding:10px; background:#0f1419; border:2px solid #333; border-radius:8px; color:#fff; font-size:16px;" />
+                    </div>
+                </div>
+                <small style="color:#888; margin-top:5px; display:block;">💡 Оставьте "До" пустым для одного уровня</small>
+            </div>
+            
+            <!-- Coins -->
+            <div style="margin-bottom:20px;">
+                <label style="display:block; margin-bottom:8px; color:#ffd700; font-weight:bold;">💰 Монеты:</label>
+                <input type="number" id="rewardCoins" min="0" value="0" placeholder="Количество монет" style="width:100%; padding:10px; background:#0f1419; border:2px solid #333; border-radius:8px; color:#fff; font-size:16px;" />
+            </div>
+            
+            <!-- Max Case Openings -->
+            <div style="margin-bottom:20px;">
+                <label style="display:block; margin-bottom:8px; color:#ffd700; font-weight:bold;">🎰 Макс. открытий кейсов:</label>
+                <input type="number" id="rewardMaxOpenings" min="0" value="0" placeholder="0 = не менять" style="width:100%; padding:10px; background:#0f1419; border:2px solid #333; border-radius:8px; color:#fff; font-size:16px;" />
+                <small style="color:#888; margin-top:5px; display:block;">Позволяет открывать несколько кейсов одновременно</small>
+            </div>
+            
+            <!-- Items (Advanced) -->
+            <div style="margin-bottom:20px;">
+                <label style="display:block; margin-bottom:8px; color:#ffd700; font-weight:bold;">🎁 Предметы (расширенное):</label>
+                <textarea id="rewardItems" rows="3" placeholder='[{"name": "Золотой камень", "rarity": "gold", "value": 5000, "image": ""}]' style="width:100%; padding:10px; background:#0f1419; border:2px solid #333; border-radius:8px; color:#fff; font-family:monospace; font-size:13px; resize:vertical;"></textarea>
+                <small style="color:#888; margin-top:5px; display:block;">JSON массив предметов (опционально)</small>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button class="btn-secondary" onclick="closeAddRewardModal()" style="flex:1; padding:12px;">Отмена</button>
+                <button class="btn-primary" onclick="saveNewReward()" style="flex:2; padding:12px; font-weight:bold;">💾 Сохранить</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Import Modal -->
     <div id="importModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
         <div style="background:#fff; padding:20px; width:720px; max-width:95%; border-radius:8px;">
@@ -476,6 +576,10 @@
                 
                 <label>Цена (монеты)</label>
                 <input type="number" id="case-price" placeholder="100" min="1" required>
+                
+                <label>XP за открытие</label>
+                <input type="number" id="case-xp" placeholder="10" min="1" required>
+                <small style="color: #999;">Количество опыта, которое игрок получит за открытие этого кейса</small>
                 
                 <label style="display: flex; align-items: center; gap: 8px; margin-top: 15px;">
                     <input type="checkbox" id="case-enabled" style="width: auto;">
@@ -556,7 +660,7 @@
                     const users = await res.json();
                     let xml = '<users>\n';
                     for (const u of users) {
-                        xml += `  <user id="${u.id}" telegramId="${u.telegramId}" coins="${u.coins}" username="${u.username||''}" firstName="${u.firstName||''}">\n`;
+                        xml += `  <user id="${u.id}" telegramId="${u.telegramId}" coins="${u.coins}" username="${u.username||''}" firstName="${u.firstName||''}" xp="${u.xp||0}" level="${u.level||1}" earnedMilestones="${u.earnedMilestones||0}">\n`;
                         xml += `    <inventory>\n`;
                         for (const item of u.inventory) {
                             xml += `      <item name="${escapeXml(item.name)}" value="${item.value}" rarity="${item.rarity||''}" instanceId="${item.instanceId||''}" image="${item.image||''}" />\n`;
@@ -701,16 +805,18 @@
         // Load data
         async function loadData() {
             try {
-                const [casesRes, usersRes, promosRes] = await Promise.all([
+                const [casesRes, usersRes, promosRes, settingsRes] = await Promise.all([
                     fetch('/api/cases'),
                     fetch('/api/users'),
-                    fetch('/api/promos')
+                    fetch('/api/promos'),
+                    fetch('/api/settings')
                 ]);
                 
                 const cases = await casesRes.json();
                 window.cases = cases; // Глобально для экспорта
                 const users = await usersRes.json();
                 const promos = await promosRes.json();
+                const settings = await settingsRes.json();
                 
                 // Update stats
                 document.getElementById('stat-users').textContent = users.length;
@@ -721,9 +827,148 @@
                 renderCases(cases);
                 renderUsers(users);
                 renderPromos && renderPromos(promos);
+                renderSettings(settings);
             } catch (err) {
                 showNotification('Ошибка загрузки данных', 'error');
             }
+        }
+        
+        // Render settings
+        function renderSettings(settings) {
+            const rewards = settings.levelRewards || [];
+            const levelRewardsList = document.getElementById('levelRewardsList');
+            const noRewardsMessage = document.getElementById('noRewardsMessage');
+            
+            if (rewards.length === 0) {
+                levelRewardsList.innerHTML = '';
+                noRewardsMessage.style.display = 'block';
+                return;
+            }
+            
+            noRewardsMessage.style.display = 'none';
+            const sorted = [...rewards].sort((a, b) => a.level - b.level);
+            
+            levelRewardsList.innerHTML = sorted.map(reward => {
+                const rewardParts = [];
+                if (reward.coins > 0) rewardParts.push(`💰 ${reward.coins} монет`);
+                if (reward.maxCaseOpenings > 0) rewardParts.push(`🎰 Лимит: ${reward.maxCaseOpenings} кейсов`);
+                if (reward.items && reward.items.length > 0) rewardParts.push(`🎁 ${reward.items.length} предметов`);
+                
+                const rewardText = rewardParts.length > 0 ? rewardParts.join(' • ') : 'Нет наград';
+                
+                return `
+                    <div style="background: linear-gradient(135deg, rgba(255,215,0,0.1) 0%, rgba(255,215,0,0.05) 100%); padding: 16px; border-radius: 12px; border: 2px solid rgba(255,215,0,0.2); display: flex; justify-content: space-between; align-items: center; transition: all 0.3s ease;" onmouseover="this.style.borderColor='rgba(255,215,0,0.4)'" onmouseout="this.style.borderColor='rgba(255,215,0,0.2)'">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                                <span style="background: linear-gradient(135deg, #ffd700, #ffed4e); color: #000; font-weight: bold; padding: 4px 12px; border-radius: 20px; font-size: 14px;">Уровень ${reward.level}</span>
+                            </div>
+                            <div style="color: #ccc; font-size: 14px;">${rewardText}</div>
+                        </div>
+                        <button class="btn-danger" onclick="deleteLevelReward(${reward.level})" style="padding: 8px 16px; border-radius: 8px;">🗑️ Удалить</button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function openAddRewardModal() {
+            document.getElementById('rewardLevelFrom').value = '';
+            document.getElementById('rewardLevelTo').value = '';
+            document.getElementById('rewardCoins').value = '0';
+            document.getElementById('rewardMaxOpenings').value = '0';
+            document.getElementById('rewardItems').value = '';
+            document.getElementById('addRewardModal').style.display = 'flex';
+        }
+        
+        function closeAddRewardModal() {
+            document.getElementById('addRewardModal').style.display = 'none';
+        }
+        
+        async function saveNewReward() {
+            const levelFrom = parseInt(document.getElementById('rewardLevelFrom').value);
+            const levelTo = parseInt(document.getElementById('rewardLevelTo').value) || levelFrom;
+            const coins = parseInt(document.getElementById('rewardCoins').value) || 0;
+            const maxOpenings = parseInt(document.getElementById('rewardMaxOpenings').value) || 0;
+            const itemsText = document.getElementById('rewardItems').value.trim();
+            
+            if (!levelFrom || levelFrom < 1) {
+                alert('Укажите начальный уровень!');
+                return;
+            }
+            
+            if (levelTo < levelFrom) {
+                alert('Конечный уровень не может быть меньше начального!');
+                return;
+            }
+            
+            let items = [];
+            if (itemsText) {
+                try {
+                    items = JSON.parse(itemsText);
+                    if (!Array.isArray(items)) {
+                        alert('Предметы должны быть массивом!');
+                        return;
+                    }
+                } catch (e) {
+                    alert('Неверный JSON для предметов!\n\n' + e.message);
+                    return;
+                }
+            }
+            
+            // Create rewards for range
+            const rewardsToAdd = [];
+            for (let level = levelFrom; level <= levelTo; level++) {
+                const reward = { level };
+                if (coins > 0) reward.coins = coins;
+                if (maxOpenings > 0) reward.maxCaseOpenings = maxOpenings;
+                if (items.length > 0) reward.items = items;
+                rewardsToAdd.push(reward);
+            }
+            
+            // Add each reward
+            try {
+                for (const reward of rewardsToAdd) {
+                    const response = await fetch('/api/settings/level-rewards', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(reward)
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Ошибка добавления награды за уровень ${reward.level}`);
+                    }
+                }
+                
+                closeAddRewardModal();
+                loadData();
+                showNotification(`Добавлено наград: ${rewardsToAdd.length}`, 'success');
+            } catch (err) {
+                showNotification(err.message, 'error');
+            }
+        }
+        
+        async function deleteLevelReward(level) {
+            if (!confirm(`Удалить награду за уровень ${level}?`)) return;
+            
+            try {
+                const response = await fetch(`/api/settings/level-rewards/${level}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadData();
+                    showNotification('Награда удалена', 'success');
+                } else {
+                    showNotification('Ошибка удаления награды', 'error');
+                }
+            } catch (err) {
+                showNotification('Ошибка удаления награды', 'error');
+            }
+        }
+        
+        // Save settings
+        async function saveSettings() {
+            // No longer needed, settings are per-case
+            showNotification('Настройки XP настраиваются для каждого кейса отдельно', 'success');
         }
 
         // Export cases to a JSON file
@@ -739,7 +984,7 @@
                 let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<cases>\n';
                 for (const c of cases) {
                     if (!c || !c.id || !c.name || !Array.isArray(c.items)) continue;
-                    xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}">\n`;
+                    xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}" xpReward="${c.xpReward || 10}">\n`;
                     for (const it of (c.items || [])) {
                         if (!it || !it.id || !it.name || !it.rarity) continue;
                         if (Array.isArray(it.variations) && it.variations.length) {
@@ -982,6 +1227,7 @@
             document.getElementById('case-id').disabled = !!caseData;
             document.getElementById('case-name').value = caseData?.name || '';
             document.getElementById('case-price').value = caseData?.price || '';
+            document.getElementById('case-xp').value = caseData?.xpReward || 10;
             document.getElementById('case-enabled').checked = caseData?.enabled ?? false;
             
             renderItems();
@@ -1195,6 +1441,7 @@
                 id: document.getElementById('case-id').value,
                 name: document.getElementById('case-name').value,
                 price: parseInt(document.getElementById('case-price').value),
+                xpReward: parseInt(document.getElementById('case-xp').value) || 10,
                 enabled: document.getElementById('case-enabled').checked,
                 items: currentItems
             };

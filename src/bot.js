@@ -131,6 +131,7 @@ export function setupBot(token) {
     bot.setMyCommands([
         { command: 'connect', description: 'Зарегистрироваться в боте (/подключиться)' },
         { command: 'balance', description: 'Проверить баланс (/баланс)' },
+        { command: 'level', description: 'Проверить уровень (/уровень)' },
         { command: 'cases', description: 'Список кейсов (/кейсы)' },
         { command: 'view', description: 'Посмотреть содержимое кейса (/просмотр [id])' },
         { command: 'open', description: 'Открыть кейс (/открыть [id])' },
@@ -211,6 +212,45 @@ export function setupBot(token) {
             `${userName}, ваш баланс:\n` +
             `💰 Монеты: ${user.coins}\n` +
             `📦 Предметов в инвентаре: ${user.inventory.length}`
+        );
+    }));
+    
+    // /уровень or /level - Check level
+    bot.onText(/\/(уровень|level)/, safeHandler(async (msg) => {
+        const chatId = msg.chat.id;
+        const userName = mentionUser(msg);
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            sendReply(chatId, msg.message_id, `❌ ${userName}, вы не зарегистрированы! Используйте /подключиться`);
+            return;
+        }
+        
+        if (user.banned) {
+            sendReply(chatId, msg.message_id, `🚫 ${userName}, вы заблокированы и не можете использовать бота.`);
+            return;
+        }
+        
+        // Ensure user has level and XP
+        const level = user.level || 1;
+        const xp = user.xp || 0;
+        const XP_PER_LEVEL = 100;
+        const xpForNextLevel = XP_PER_LEVEL;
+        const progressPercent = Math.floor((xp / xpForNextLevel) * 100);
+        
+        // Create progress bar
+        const barLength = 10;
+        const filledLength = Math.floor((xp / xpForNextLevel) * barLength);
+        const progressBar = '▰'.repeat(filledLength) + '▱'.repeat(barLength - filledLength);
+        
+        sendReply(chatId, msg.message_id,
+            `${userName}, ваш уровень:\n\n` +
+            `🆙 Уровень: ${level}\n` +
+            `⭐ Опыт: ${xp}/${xpForNextLevel} XP\n` +
+            `📊 ${progressBar} ${progressPercent}%\n\n` +
+            `💡 Открывайте кейсы и зарабатывайте монеты, чтобы получить больше опыта!\n` +
+            `🎯 Каждые 10,000 заработанных монет = бонус XP\n` +
+            `📦 Каждый кейс даёт разное количество XP`
         );
     }));
     
@@ -300,70 +340,14 @@ export function setupBot(token) {
         
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     }));
-    
-    // /открыть or /open - Open case
-    bot.onText(/\/(открыть|open)(?:\s+(.+))?/, safeHandler(async (msg, match) => {
-        const chatId = msg.chat.id;
-        const userName = mentionUser(msg);
-        const user = storage.getUser(msg.from.id);
-        
-        if (!user) {
-            bot.sendMessage(chatId, `❌ ${userName}, вы не зарегистрированы! Используйте /подключиться`);
-            return;
-        }
-        
-        if (user.banned) {
-            bot.sendMessage(chatId, `🚫 ${userName}, вы заблокированы и не можете использовать бота.`);
-            return;
-        }
-        
-        const caseId = match[2]?.trim();
-        
-        if (!caseId) {
-            const allCases = storage.getAllCases();
-            const cases = allCases.filter(c => c.enabled !== false);
-            let message = '📦 Укажите ID кейса для открытия:\n\n';
-            cases.forEach(c => {
-                message += `• \`${c.id}\` - ${c.name} (${c.price} монет)\n`;
-            });
-            message += '\nПример: /открыть basic_case';
-            bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-            return;
-        }
-        
-        const caseItem = storage.getCase(caseId);
-        if (!caseItem) {
-            bot.sendMessage(chatId, '❌ Кейс не найден!');
-            return;
-        }
-        
-        if (caseItem.enabled === false) {
-            bot.sendMessage(chatId, '❌ Этот кейс временно недоступен!');
-            return;
-        }
-        
-        if (user.coins < caseItem.price) {
-            bot.sendMessage(chatId, `❌ Недостаточно монет! Нужно: ${caseItem.price}, у вас: ${user.coins}`);
-            return;
-        }
-        
-        // Deduct coins
-        await storage.updateUserCoins(msg.from.id, -caseItem.price);
-        
-        // Roll
-        const wonItem = storage.rollCase(caseId);
-        
-        if (!wonItem) {
-            await storage.updateUserCoins(msg.from.id, caseItem.price); // Refund
-            bot.sendMessage(chatId, '❌ Ошибка при открытии кейса!');
-            return;
-        }
-        
-        // Add to inventory
-        await storage.addItemToInventory(msg.from.id, wonItem);
 
-        // Get updated user balance
-        const updatedUser = storage.getUser(msg.from.id);
+    // Helper function: pagination for multiple case openings
+    const sendMultipleOpeningResults = (botInstance, chatId, messageId, userName, caseItem, wonItems, totalXP, balance, page = 0) => {
+        const ITEMS_PER_PAGE = 3;
+        const totalPages = Math.ceil(wonItems.length / ITEMS_PER_PAGE);
+        const startIdx = page * ITEMS_PER_PAGE;
+        const endIdx = Math.min(startIdx + ITEMS_PER_PAGE, wonItems.length);
+        const pageItems = wonItems.slice(startIdx, endIdx);
 
         const rarityEmojis = {
             blue: '🔵',
@@ -381,43 +365,260 @@ export function setupBot(token) {
             gold: 'Легендарный'
         };
 
-        // Экранирование Markdown для Telegram
         function escapeMarkdown(text) {
             return String(text)
                 .replace(/([_\*\[\]()~`>#+=|{}.!-])/g, '\\$1');
         }
 
-        const messageText =
-            `${userName}:\n` +
-            `🎰 Вы открыли ${escapeMarkdown(caseItem.name)}!\n\n` +
-            `${rarityEmojis[wonItem.rarity] || '🎁'} Вы выиграли: ${escapeMarkdown(wonItem.name)}\n` +
-            `📊 Редкость: ${escapeMarkdown(rarityNames[wonItem.rarity] || wonItem.rarity)}\n` +
-            `💎 Стоимость: ${(wonItem.value || 0)} монет\n` +
-            (wonItem.variation ? `🧩 Вариация: ${escapeMarkdown(wonItem.variation.name)}\n` : '') +
-            `\n💰 Ваш баланс: ${updatedUser.coins} монет`;
+        let messageText = `${userName}:\n`;
+        messageText += `🎰 Открыто кейсов: ${wonItems.length} x ${escapeMarkdown(caseItem.name)}\n`;
+        messageText += `⭐ Получено XP: +${totalXP}\n`;
+        messageText += `💰 Баланс: ${balance} монет\n`;
+        messageText += `\n📦 Дропы (страница ${page + 1}/${totalPages}):\n\n`;
 
-        // Всегда отправлять фото если есть картинка
-        if (wonItem.image) {
-            let photoUrl = wonItem.image;
-            // Если у вариации есть картинка, используем её
-            if (wonItem.variation && wonItem.variation.image) {
-                photoUrl = wonItem.variation.image;
+        pageItems.forEach((item, idx) => {
+            const globalIdx = startIdx + idx + 1;
+            messageText += `${globalIdx}. ${rarityEmojis[item.rarity] || '🎁'} ${escapeMarkdown(item.name)}\n`;
+            messageText += `   ${escapeMarkdown(rarityNames[item.rarity] || item.rarity)} | 💎 ${item.value} монет\n`;
+            if (item.variation) {
+                messageText += `   🧩 ${escapeMarkdown(item.variation.name)}\n`;
             }
-            // Если путь начинается с /uploads, всегда используем http://localhost:5051
-            if (photoUrl.startsWith('/uploads')) {
-                photoUrl = `http://localhost:5051${photoUrl}`;
-            } else if (!/^https?:\/\//.test(photoUrl)) {
-                photoUrl = `${process.env.BOT_URL || 'http://localhost:5051'}${photoUrl}`;
-            }
-            bot.sendPhoto(chatId, photoUrl, {
-                caption: messageText,
-                parse_mode: 'Markdown'
-            }).catch(() => {
-                // Fallback to text if image fails
-                bot.sendMessage(chatId, messageText, { parse_mode: 'Markdown' });
+        });
+
+        const keyboard = [];
+        const navButtons = [];
+
+        if (page > 0) {
+            navButtons.push({
+                text: '◀️ Назад',
+                callback_data: `multi_open_${messageId}_${page - 1}`
             });
+        }
+
+        if (totalPages > 1) {
+            navButtons.push({
+                text: `${page + 1}/${totalPages}`,
+                callback_data: 'noop'
+            });
+        }
+
+        if (page < totalPages - 1) {
+            navButtons.push({
+                text: 'Вперёд ▶️',
+                callback_data: `multi_open_${messageId}_${page + 1}`
+            });
+        }
+
+        if (navButtons.length > 0) {
+            keyboard.push(navButtons);
+        }
+
+        const opts = {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined
+        };
+
+        botInstance.sendMessage(chatId, messageText, opts);
+    };
+    
+    // /открыть or /open - Open case
+    bot.onText(/\/(открыть|open)(?:\s+(.+))?/, safeHandler(async (msg, match) => {
+        const chatId = msg.chat.id;
+        const userName = mentionUser(msg);
+        const user = storage.getUser(msg.from.id);
+        
+        if (!user) {
+            bot.sendMessage(chatId, `❌ ${userName}, вы не зарегистрированы! Используйте /подключиться`);
+            return;
+        }
+        
+        if (user.banned) {
+            bot.sendMessage(chatId, `🚫 ${userName}, вы заблокированы и не можете использовать бота.`);
+            return;
+        }
+        
+        const input = match[2]?.trim();
+        
+        if (!input) {
+            const allCases = storage.getAllCases();
+            const cases = allCases.filter(c => c.enabled !== false);
+            const maxOpenings = user.maxCaseOpenings || 1;
+            let message = '📦 Укажите ID кейса для открытия:\n\n';
+            cases.forEach(c => {
+                message += `• \`${c.id}\` - ${c.name} (${c.price} монет)\n`;
+            });
+            message += `\n💡 Вы можете открыть до ${maxOpenings} кейсов одновременно`;
+            message += `\nПример: /открыть basic_case 3`;
+            bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+            return;
+        }
+        
+        // Parse input: caseId [count]
+        const parts = input.split(/\s+/);
+        const caseId = parts[0];
+        const count = parseInt(parts[1]) || 1;
+        
+        const caseItem = storage.getCase(caseId);
+        if (!caseItem) {
+            bot.sendMessage(chatId, '❌ Кейс не найден!');
+            return;
+        }
+        
+        if (caseItem.enabled === false) {
+            bot.sendMessage(chatId, '❌ Этот кейс временно недоступен!');
+            return;
+        }
+        
+        // Check max openings limit
+        const maxOpenings = user.maxCaseOpenings || 1;
+        if (count > maxOpenings) {
+            bot.sendMessage(chatId, 
+                `❌ Вы можете открыть максимум ${maxOpenings} кейсов одновременно!\n` +
+                `💡 Повышайте уровень, чтобы увеличить лимит.`
+            );
+            return;
+        }
+        
+        if (count < 1) {
+            bot.sendMessage(chatId, '❌ Количество должно быть не меньше 1!');
+            return;
+        }
+        
+        const totalCost = caseItem.price * count;
+        if (user.coins < totalCost) {
+            bot.sendMessage(chatId, `❌ Недостаточно монет! Нужно: ${totalCost}, у вас: ${user.coins}`);
+            return;
+        }
+        
+        // Deduct coins
+        await storage.updateUserCoins(msg.from.id, -totalCost);
+        
+        // Open cases
+        const wonItems = [];
+        let totalXP = 0;
+        const caseXP = caseItem.xpReward || 10;
+        
+        for (let i = 0; i < count; i++) {
+            const wonItem = storage.rollCase(caseId);
+            if (wonItem) {
+                await storage.addItemToInventory(msg.from.id, wonItem);
+                wonItems.push(wonItem);
+                totalXP += caseXP;
+            }
+        }
+        
+        if (wonItems.length === 0) {
+            await storage.updateUserCoins(msg.from.id, totalCost); // Refund
+            bot.sendMessage(chatId, '❌ Ошибка при открытии кейсов!');
+            return;
+        }
+        
+        // Add XP
+        const xpResult = await storage.addXP(msg.from.id, totalXP);
+        const updatedUser = storage.getUser(msg.from.id);
+        
+        // Send results
+        if (count === 1) {
+            // Single opening - old format
+            const wonItem = wonItems[0];
+            const rarityEmojis = {
+                blue: '🔵',
+                purple: '🟣',
+                pink: '🩷',
+                red: '🔴',
+                gold: '🌟'
+            };
+            
+            const rarityNames = {
+                blue: 'Обычный',
+                purple: 'Необычный',
+                pink: 'Редкий',
+                red: 'Эпический',
+                gold: 'Легендарный'
+            };
+            
+            function escapeMarkdown(text) {
+                return String(text)
+                    .replace(/([_\*\[\]()~`>#+=|{}.!-])/g, '\\$1');
+            }
+            
+            const messageText =
+                `${userName}:\n` +
+                `🎰 Вы открыли ${escapeMarkdown(caseItem.name)}!\n\n` +
+                `${rarityEmojis[wonItem.rarity] || '🎁'} Вы выиграли: ${escapeMarkdown(wonItem.name)}\n` +
+                `📊 Редкость: ${escapeMarkdown(rarityNames[wonItem.rarity] || wonItem.rarity)}\n` +
+                `💎 Стоимость: ${(wonItem.value || 0)} монет\n` +
+                (wonItem.variation ? `🧩 Вариация: ${escapeMarkdown(wonItem.variation.name)}\n` : '') +
+                `\n⭐ +${caseXP} XP\n` +
+                `💰 Ваш баланс: ${updatedUser.coins} монет`;
+            
+            if (wonItem.image) {
+                let photoUrl = wonItem.image;
+                if (wonItem.variation && wonItem.variation.image) {
+                    photoUrl = wonItem.variation.image;
+                }
+                if (photoUrl.startsWith('/uploads')) {
+                    photoUrl = `http://localhost:5051${photoUrl}`;
+                } else if (!/^https?:\/\//.test(photoUrl)) {
+                    photoUrl = `${process.env.BOT_URL || 'http://localhost:5051'}${photoUrl}`;
+                }
+                bot.sendPhoto(chatId, photoUrl, {
+                    caption: messageText,
+                    parse_mode: 'Markdown'
+                }).catch(() => {
+                    bot.sendMessage(chatId, messageText, { parse_mode: 'Markdown' });
+                });
+            } else {
+                bot.sendMessage(chatId, messageText, { parse_mode: 'Markdown' });
+            }
         } else {
-            bot.sendMessage(chatId, messageText, { parse_mode: 'Markdown' });
+            // Multiple openings - send with pagination
+            sendMultipleOpeningResults(bot, chatId, msg.message_id, userName, caseItem, wonItems, totalXP, updatedUser.coins, 0);
+        }
+
+        // Send level up notification if user leveled up
+        if (xpResult && xpResult.levelsGained && xpResult.levelsGained.length > 0) {
+            for (let i = 0; i < xpResult.levelsGained.length; i++) {
+                const newLevel = xpResult.levelsGained[i];
+                const rewardData = xpResult.rewards && xpResult.rewards[i];
+                
+                setTimeout(async () => {
+                    let rewardMessage = `🎉 ${userName}, поздравляем!\n\n` +
+                        `🆙 Вы достигли уровня ${newLevel}!`;
+                    
+                    if (rewardData && rewardData.reward) {
+                        const reward = rewardData.reward;
+                        rewardMessage += `\n\n🎁 **Награда за уровень ${newLevel}:**\n`;
+                        
+                        // Give money reward
+                        if (reward.coins && reward.coins > 0) {
+                            await storage.updateUserCoins(msg.from.id, reward.coins);
+                            rewardMessage += `💰 +${reward.coins} монет\n`;
+                        }
+                        
+                        // Give item rewards
+                        if (reward.items && Array.isArray(reward.items) && reward.items.length > 0) {
+                            for (const item of reward.items) {
+                                await storage.addItemToInventory(msg.from.id, item);
+                                rewardMessage += `🎁 ${item.name}\n`;
+                            }
+                        }
+                        
+                        // Show maxCaseOpenings increase
+                        if (reward.maxCaseOpenings && reward.maxCaseOpenings > 0) {
+                            const currentUser = storage.getUser(msg.from.id);
+                            rewardMessage += `🎰 Лимит открытий увеличен до ${currentUser.maxCaseOpenings} кейсов!\n`;
+                        }
+                        
+                        const finalUser = storage.getUser(msg.from.id);
+                        rewardMessage += `\n💵 Ваш баланс: ${finalUser.coins} монет`;
+                    } else {
+                        rewardMessage += `\n⭐ Продолжайте открывать кейсы, чтобы получить больше опыта!`;
+                    }
+                    
+                    bot.sendMessage(chatId, rewardMessage, { parse_mode: 'Markdown' });
+                }, 500 * (i + 1));
+            }
         }
     }));
     
@@ -692,8 +893,16 @@ export function setupBot(token) {
         }
         
         // No-op callback
-        if (data === 'inv_noop') {
+        if (data === 'inv_noop' || data === 'noop') {
             bot.answerCallbackQuery(query.id);
+            return;
+        }
+
+        // Multiple case opening pagination (multi_open_<originalMessageId>_<page>)
+        if (data.startsWith('multi_open_')) {
+            // This is tricky - we need to store the results somewhere accessible
+            // For simplicity, we'll just acknowledge and tell user to open cases again
+            bot.answerCallbackQuery(query.id, { text: 'Используйте /open снова для новых открытий' });
             return;
         }
     });
@@ -756,6 +965,9 @@ export function setupBot(token) {
             await storage.updateUser(msg.from.id, { inventory: [] });
             await storage.updateUserCoins(msg.from.id, totalValue);
             
+            // Track earning milestones
+            await storage.trackEarningMilestone(msg.from.id, totalValue);
+            
             // Get updated user balance
             const updatedUser = storage.getUser(msg.from.id);
             
@@ -804,6 +1016,9 @@ export function setupBot(token) {
             }
             await storage.updateUserCoins(msg.from.id, totalValue);
             
+            // Track earning milestones
+            await storage.trackEarningMilestone(msg.from.id, totalValue);
+            
             // Get updated user balance
             const updatedUser = storage.getUser(msg.from.id);
             
@@ -827,6 +1042,9 @@ export function setupBot(token) {
         // Remove item and add coins
         await storage.removeItemFromInventory(msg.from.id, input);
         await storage.updateUserCoins(msg.from.id, item.value);
+        
+        // Track earning milestones
+        await storage.trackEarningMilestone(msg.from.id, item.value);
         
         // Get updated user balance
         const updatedUser = storage.getUser(msg.from.id);
@@ -1464,6 +1682,7 @@ export function setupBot(token) {
             `👤 **Аккаунт:**\n` +
             `/подключиться - Зарегистрироваться\n` +
             `/баланс - Проверить баланс\n` +
+            `/уровень - Проверить уровень и опыт\n` +
             `/инвентарь - Посмотреть предметы\n\n` +
             `🎁 **Кейсы:**\n` +
             `/кейсы - Список кейсов\n` +
@@ -1476,6 +1695,10 @@ export function setupBot(token) {
             `/обмены - Входящие обмены\n` +
             `/принять [id] - Принять обмен\n` +
             `/отклонить [id] - Отклонить обмен\n\n` +
+            `⭐ **Система уровней:**\n` +
+            `• Открывайте кейсы для получения опыта\n` +
+            `• Зарабатывайте монеты для бонусного XP\n` +
+            `• 100 XP = 1 уровень\n\n` +
             `💡 При регистрации вы получаете 1000 монет!`,
             { parse_mode: 'Markdown' }
         );

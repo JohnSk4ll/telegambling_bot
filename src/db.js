@@ -17,11 +17,15 @@ const adapter = new JSONFile(file);
 
 const defaultData = {
     users: [],
+    settings: {
+        levelRewards: [] // Rewards for each level
+    },
     cases: [
         {
             id: 'basic_case',
             name: 'Базовый кейс',
             price: 100,
+            xpReward: 10, // XP reward for opening this case
             items: [
                 // Blue items (50% total chance) - Common
                 { id: 'blue_1', name: '🔵 Синий камень', rarity: 'blue', chance: 10, value: 50 },
@@ -67,6 +71,7 @@ if (!db.data) {
 if (!db.data.users) db.data.users = [];
 if (!db.data.cases) db.data.cases = defaultData.cases;
 if (!db.data.trades) db.data.trades = [];
+if (!db.data.settings) db.data.settings = defaultData.settings;
 await db.write();
 
 // Debounced write mechanism to prevent excessive disk I/O

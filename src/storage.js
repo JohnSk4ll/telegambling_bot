@@ -57,6 +57,10 @@ export async function createUser(telegramId, username, firstName) {
         inventory: [],
         banned: false,
         lastDaily: null,
+        xp: 0,
+        level: 1,
+        earnedMilestones: 0, // Track how many times user earned 10000 coins
+        maxCaseOpenings: 1, // Maximum cases that can be opened at once
         createdAt: new Date().toISOString()
     };
     
@@ -602,4 +606,119 @@ export async function upsertCases(casesArr) {
     }
     await db.write();
     return db.data.cases;
+}
+
+// Level and XP functions
+export function getSettings() {
+    if (!db.data.settings) {
+        db.data.settings = { levelRewards: [] };
+    }
+    if (!db.data.settings.levelRewards) {
+        db.data.settings.levelRewards = [];
+    }
+    return db.data.settings;
+}
+
+export async function updateSettings(updates) {
+    if (!db.data.settings) {
+        db.data.settings = { levelRewards: [] };
+    }
+    Object.assign(db.data.settings, updates);
+    await db.write();
+    return db.data.settings;
+}
+
+export async function addLevelReward(reward) {
+    const settings = getSettings();
+    if (!settings.levelRewards) settings.levelRewards = [];
+    
+    // Check if reward for this level already exists
+    const existingIndex = settings.levelRewards.findIndex(r => r.level === reward.level);
+    if (existingIndex >= 0) {
+        settings.levelRewards[existingIndex] = reward;
+    } else {
+        settings.levelRewards.push(reward);
+    }
+    
+    await db.write();
+    return settings;
+}
+
+export async function removeLevelReward(level) {
+    const settings = getSettings();
+    if (!settings.levelRewards) return settings;
+    
+    settings.levelRewards = settings.levelRewards.filter(r => r.level !== level);
+    await db.write();
+    return settings;
+}
+
+export function getLevelReward(level) {
+    const settings = getSettings();
+    if (!settings.levelRewards) return null;
+    return settings.levelRewards.find(r => r.level === level);
+}
+
+export async function addXP(telegramId, amount) {
+    const user = getUser(telegramId);
+    if (!user) return null;
+    
+    // Ensure user has XP and level fields
+    if (typeof user.xp !== 'number') user.xp = 0;
+    if (typeof user.level !== 'number') user.level = 1;
+    if (typeof user.maxCaseOpenings !== 'number') user.maxCaseOpenings = 1;
+    
+    user.xp += amount;
+    
+    // Check for level up (100 XP per level)
+    const XP_PER_LEVEL = 100;
+    const levelsGained = [];
+    const rewards = [];
+    
+    while (user.xp >= XP_PER_LEVEL) {
+        user.xp -= XP_PER_LEVEL;
+        user.level += 1;
+        levelsGained.push(user.level);
+        
+        // Check if there's a reward for this level
+        const reward = getLevelReward(user.level);
+        if (reward) {
+            rewards.push({ level: user.level, reward });
+            
+            // Apply maxCaseOpenings increase if specified
+            if (reward.maxCaseOpenings) {
+                user.maxCaseOpenings = Math.max(user.maxCaseOpenings, reward.maxCaseOpenings);
+            }
+        }
+    }
+    
+    invalidateUserCache(telegramId);
+    await debouncedWrite();
+    
+    return { user, levelsGained, rewards };
+}
+
+export async function trackEarningMilestone(telegramId, coinsEarned) {
+    const user = getUser(telegramId);
+    if (!user) return null;
+    
+    // Ensure earnedMilestones exists
+    if (typeof user.earnedMilestones !== 'number') user.earnedMilestones = 0;
+    
+    const MILESTONE = 10000;
+    if (coinsEarned >= MILESTONE) {
+        const milestonesEarned = Math.floor(coinsEarned / MILESTONE);
+        
+        for (let i = 0; i < milestonesEarned; i++) {
+            const currentMilestone = user.earnedMilestones;
+            
+            // First 5 milestones give 20 XP, after that 5 XP
+            const xpToGive = currentMilestone < 5 ? 20 : 5;
+            
+            user.earnedMilestones += 1;
+            await addXP(telegramId, xpToGive);
+        }
+    }
+    
+    return user;
 }
