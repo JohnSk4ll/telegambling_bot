@@ -66,7 +66,7 @@ export function setupServer(port = 5051) {
                     id: c.id,
                     name: c.name,
                     price: Number(c.price) || 0,
-                    xpReward: Number(c.xpReward) || 10,
+                    xpReward: c.xpReward !== undefined ? Number(c.xpReward) : 10,
                     items: items.map(it => {
                         const item = {
                             id: it.id,
@@ -280,7 +280,7 @@ export function setupServer(port = 5051) {
     
     // Create new case
     app.post('/api/cases', async (req, res) => {
-        const { id, name, price, items } = req.body;
+        const { id, name, price, items, xpReward } = req.body;
         
         if (!name || typeof price !== 'number') {
             return res.status(400).json({ error: 'Name and price are required' });
@@ -301,13 +301,19 @@ export function setupServer(port = 5051) {
             return res.status(400).json({ error: 'Case with this ID already exists' });
         }
         
-        const newCase = await storage.createCase({ id, name, price, items: items || [] });
+        const newCase = await storage.createCase({ 
+            id, 
+            name, 
+            price, 
+            items: items || [],
+            xpReward: xpReward !== undefined ? xpReward : 10
+        });
         res.status(201).json(newCase);
     });
     
     // Update case
     app.put('/api/cases/:id', async (req, res) => {
-        const { name, price, items } = req.body;
+        const { name, price, items, xpReward } = req.body;
         
         // Validate items if provided
         if (items && items.length > 0) {
@@ -319,7 +325,12 @@ export function setupServer(port = 5051) {
             }
         }
         
-        const updated = await storage.updateCase(req.params.id, { name, price, items });
+        const updateData = { name, price, items };
+        if (xpReward !== undefined) {
+            updateData.xpReward = xpReward;
+        }
+        
+        const updated = await storage.updateCase(req.params.id, updateData);
         if (!updated) {
             return res.status(404).json({ error: 'Case not found' });
         }

@@ -495,7 +495,9 @@ export function setupBot(token) {
             const maxOpenings = user.maxCaseOpenings || 1;
             let message = '📦 Укажите ID кейса для открытия:\n\n';
             cases.forEach(c => {
-                message += `• \`${c.id}\` - ${c.name} (${c.price} монет)\n`;
+                const caseId = String(c.id).replace(/([_*[\]()~`>#+=|{}.!-])/g, '\\$1');
+                const caseName = String(c.name).replace(/([_*[\]()~`>#+=|{}.!-])/g, '\\$1');
+                message += `• \`${caseId}\` - ${caseName} (${c.price} монет)\n`;
             });
             message += `\n💡 Вы можете открыть до ${maxOpenings} кейсов одновременно`;
             message += `\nПример: /открыть basic_case 3`;
@@ -546,7 +548,7 @@ export function setupBot(token) {
         // Open cases
         const wonItems = [];
         let totalXP = 0;
-        const caseXP = caseItem.xpReward || 10;
+        const caseXP = caseItem.xpReward !== undefined ? caseItem.xpReward : 10;
         
         for (let i = 0; i < count; i++) {
             const wonItem = storage.rollCase(caseId);

@@ -580,7 +580,7 @@
                 <input type="number" id="case-price" placeholder="100" min="1" required>
                 
                 <label>XP за открытие</label>
-                <input type="number" id="case-xp" placeholder="10" min="1" required>
+                <input type="number" id="case-xp" placeholder="10" min="0" required>
                 <small style="color: #999;">Количество опыта, которое игрок получит за открытие этого кейса</small>
                 
                 <label style="display: flex; align-items: center; gap: 8px; margin-top: 15px;">
@@ -997,7 +997,7 @@
                 let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<cases>\n';
                 for (const c of cases) {
                     if (!c || !c.id || !c.name || !Array.isArray(c.items)) continue;
-                    xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}" xpReward="${c.xpReward || 10}">\n`;
+                    xml += `  <case id="${escapeXml(c.id)}" name="${escapeXml(c.name)}" price="${c.price}" xpReward="${c.xpReward !== undefined ? c.xpReward : 10}">\n`;
                     for (const it of (c.items || [])) {
                         if (!it || !it.id || !it.name || !it.rarity) continue;
                         if (Array.isArray(it.variations) && it.variations.length) {
@@ -1257,7 +1257,7 @@
             document.getElementById('case-id').disabled = !!caseData;
             document.getElementById('case-name').value = caseData?.name || '';
             document.getElementById('case-price').value = caseData?.price || '';
-            document.getElementById('case-xp').value = caseData?.xpReward || 10;
+            document.getElementById('case-xp').value = caseData?.xpReward !== undefined ? caseData.xpReward : 10;
             document.getElementById('case-enabled').checked = caseData?.enabled ?? false;
             
             renderItems();
@@ -1471,7 +1471,7 @@
                 id: document.getElementById('case-id').value,
                 name: document.getElementById('case-name').value,
                 price: parseInt(document.getElementById('case-price').value),
-                xpReward: parseInt(document.getElementById('case-xp').value) || 10,
+                xpReward: (() => { const val = parseInt(document.getElementById('case-xp').value); return !isNaN(val) ? val : 10; })(),
                 enabled: document.getElementById('case-enabled').checked,
                 items: currentItems
             };

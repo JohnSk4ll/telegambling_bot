@@ -296,7 +296,12 @@ export async function getLastDailyRewardDate() {
 }
 
 export function getCase(caseId) {
-    return db.data.cases.find(c => c.id === caseId);
+    const caseItem = db.data.cases.find(c => c.id === caseId);
+    // Ensure xpReward exists for backwards compatibility
+    if (caseItem && caseItem.xpReward === undefined) {
+        caseItem.xpReward = 10;
+    }
+    return caseItem;
 }
 
 export async function createCase(caseData) {
@@ -304,6 +309,7 @@ export async function createCase(caseData) {
         id: caseData.id || Date.now().toString(),
         name: caseData.name,
         price: caseData.price,
+        xpReward: caseData.xpReward !== undefined ? caseData.xpReward : 10,
         items: caseData.items || []
     };
     
