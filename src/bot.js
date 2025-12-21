@@ -83,6 +83,9 @@ export function setupBot(token) {
         });
     };
     
+    // Storage for multi-opening results (for pagination)
+    const multiOpeningCache = new Map();
+    
     // Хелпер для упоминания пользователя (создаёт @username)
     const mentionUser = (userOrMsg) => {
         if (!userOrMsg) {
@@ -342,7 +345,7 @@ export function setupBot(token) {
     }));
 
     // Helper function: pagination for multiple case openings
-    const sendMultipleOpeningResults = (botInstance, chatId, messageId, userName, caseItem, wonItems, totalXP, balance, page = 0) => {
+    const sendMultipleOpeningResults = (botInstance, chatId, userName, caseItem, wonItems, totalXP, balance, page = 0, sentMessageId = null, editMode = false) => {
         const ITEMS_PER_PAGE = 3;
         const totalPages = Math.ceil(wonItems.length / ITEMS_PER_PAGE);
         const startIdx = page * ITEMS_PER_PAGE;
@@ -385,40 +388,87 @@ export function setupBot(token) {
             }
         });
 
-        const keyboard = [];
-        const navButtons = [];
+        const createKeyboard = (msgId) => {
+            const keyboard = [];
+            const navButtons = [];
 
-        if (page > 0) {
-            navButtons.push({
-                text: '◀️ Назад',
-                callback_data: `multi_open_${messageId}_${page - 1}`
-            });
-        }
+            if (page > 0) {
+                navButtons.push({
+                    text: '◀️ Назад',
+                    callback_data: `multi_open_${msgId}_${page - 1}`
+                });
+            }
 
-        if (totalPages > 1) {
-            navButtons.push({
-                text: `${page + 1}/${totalPages}`,
-                callback_data: 'noop'
-            });
-        }
+            if (totalPages > 1) {
+                navButtons.push({
+                    text: `${page + 1}/${totalPages}`,
+                    callback_data: 'noop'
+                });
+            }
 
-        if (page < totalPages - 1) {
-            navButtons.push({
-                text: 'Вперёд ▶️',
-                callback_data: `multi_open_${messageId}_${page + 1}`
-            });
-        }
+            if (page < totalPages - 1) {
+                navButtons.push({
+                    text: 'Вперёд ▶️',
+                    callback_data: `multi_open_${msgId}_${page + 1}`
+                });
+            }
 
-        if (navButtons.length > 0) {
-            keyboard.push(navButtons);
-        }
+            if (navButtons.length > 0) {
+                keyboard.push(navButtons);
+            }
 
-        const opts = {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined
+            return keyboard;
         };
 
-        botInstance.sendMessage(chatId, messageText, opts);
+        if (editMode && sentMessageId) {
+            // Edit existing message
+            const keyboard = createKeyboard(sentMessageId);
+            const opts = {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined
+            };
+            
+            botInstance.editMessageText(messageText, {
+                chat_id: chatId,
+                message_id: sentMessageId,
+                ...opts
+            }).catch(err => {
+                console.error('Error editing message:', err);
+            });
+        } else {
+            // Send new message first without buttons
+            botInstance.sendMessage(chatId, messageText, { parse_mode: 'Markdown' }).then((sent) => {
+                // Cache the results for pagination
+                multiOpeningCache.set(sent.message_id, {
+                    userName,
+                    caseItem,
+                    wonItems,
+                    totalXP,
+                    balance,
+                    chatId
+                });
+                
+                console.log(`Cached multi-opening results for message ${sent.message_id}`);
+                
+                // Now edit the message to add buttons with correct message_id
+                if (totalPages > 1) {
+                    const keyboard = createKeyboard(sent.message_id);
+                    botInstance.editMessageReplyMarkup(
+                        { inline_keyboard: keyboard },
+                        { chat_id: chatId, message_id: sent.message_id }
+                    ).catch(err => {
+                        console.error('Error adding buttons:', err);
+                    });
+                }
+                
+                // Clean up old cache entries after 5 minutes
+                setTimeout(() => {
+                    multiOpeningCache.delete(sent.message_id);
+                }, 5 * 60 * 1000);
+            }).catch(err => {
+                console.error('Error sending multi-opening results:', err);
+            });
+        }
     };
     
     // /открыть or /open - Open case
@@ -573,7 +623,7 @@ export function setupBot(token) {
             }
         } else {
             // Multiple openings - send with pagination
-            sendMultipleOpeningResults(bot, chatId, msg.message_id, userName, caseItem, wonItems, totalXP, updatedUser.coins, 0);
+            sendMultipleOpeningResults(bot, chatId, userName, caseItem, wonItems, totalXP, updatedUser.coins, 0);
         }
 
         // Send level up notification if user leveled up
@@ -900,9 +950,35 @@ export function setupBot(token) {
 
         // Multiple case opening pagination (multi_open_<originalMessageId>_<page>)
         if (data.startsWith('multi_open_')) {
-            // This is tricky - we need to store the results somewhere accessible
-            // For simplicity, we'll just acknowledge and tell user to open cases again
-            bot.answerCallbackQuery(query.id, { text: 'Используйте /open снова для новых открытий' });
+            const parts = data.split('_');
+            if (parts.length === 4) {
+                const msgId = parseInt(parts[2]);
+                const page = parseInt(parts[3]);
+                
+                console.log(`Pagination request for message ${msgId}, page ${page}`);
+                console.log(`Cache has ${multiOpeningCache.size} entries`);
+                
+                const cached = multiOpeningCache.get(msgId);
+                if (cached) {
+                    console.log('Found cached data, updating message...');
+                    sendMultipleOpeningResults(
+                        bot,
+                        cached.chatId,
+                        cached.userName,
+                        cached.caseItem,
+                        cached.wonItems,
+                        cached.totalXP,
+                        cached.balance,
+                        page,
+                        msgId,
+                        true // Edit mode
+                    );
+                    bot.answerCallbackQuery(query.id);
+                } else {
+                    console.log('No cached data found');
+                    bot.answerCallbackQuery(query.id, { text: 'Результаты устарели. Откройте кейсы снова.' });
+                }
+            }
             return;
         }
     });
