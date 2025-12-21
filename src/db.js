@@ -72,6 +72,22 @@ if (!db.data.users) db.data.users = [];
 if (!db.data.cases) db.data.cases = defaultData.cases;
 if (!db.data.trades) db.data.trades = [];
 if (!db.data.settings) db.data.settings = defaultData.settings;
+
+// Migration: Add xpReward to existing cases that don't have it
+let needsMigration = false;
+if (db.data.cases && Array.isArray(db.data.cases)) {
+    for (const caseItem of db.data.cases) {
+        if (caseItem.xpReward === undefined) {
+            caseItem.xpReward = 10;
+            needsMigration = true;
+            console.log(`Migration: Added xpReward=10 to case "${caseItem.id}"`);
+        }
+    }
+}
+
+if (needsMigration) {
+    console.log('Migrating database: saving xpReward values...');
+}
 await db.write();
 
 // Debounced write mechanism to prevent excessive disk I/O

@@ -313,7 +313,7 @@ export function setupServer(port = 5051) {
     
     // Update case
     app.put('/api/cases/:id', async (req, res) => {
-        const { name, price, items, xpReward } = req.body;
+        const { name, price, items, xpReward, enabled } = req.body;
         
         // Validate items if provided
         if (items && items.length > 0) {
@@ -325,10 +325,12 @@ export function setupServer(port = 5051) {
             }
         }
         
-        const updateData = { name, price, items };
-        if (xpReward !== undefined) {
-            updateData.xpReward = xpReward;
-        }
+        const updateData = {};
+        if (name !== undefined) updateData.name = name;
+        if (price !== undefined) updateData.price = price;
+        if (items !== undefined) updateData.items = items;
+        if (enabled !== undefined) updateData.enabled = enabled;
+        if (xpReward !== undefined) updateData.xpReward = xpReward;
         
         const updated = await storage.updateCase(req.params.id, updateData);
         if (!updated) {
