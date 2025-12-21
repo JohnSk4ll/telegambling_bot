@@ -428,6 +428,8 @@
                         <th>Имя</th>
                         <th>Username</th>
                         <th>Монеты</th>
+                        <th>⭐ Уровень</th>
+                        <th>✨ XP</th>
                         <th>Предметов</th>
                         <th>Действия</th>
                     </tr>
@@ -636,6 +638,17 @@
                 
                 <label>Монеты</label>
                 <input type="number" id="user-coins" min="0" required>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                    <div>
+                        <label>⭐ Уровень</label>
+                        <input type="number" id="user-level" min="1" required>
+                    </div>
+                    <div>
+                        <label>✨ Опыт (XP)</label>
+                        <input type="number" id="user-xp" min="0" required>
+                    </div>
+                </div>
                 
                 <h3 style="margin: 20px 0 10px;">Инвентарь</h3>
                 
@@ -1194,12 +1207,28 @@
         // Render users
         function renderUsers(users) {
             const tbody = document.getElementById('users-tbody');
-            tbody.innerHTML = users.map(u => `
+            tbody.innerHTML = users.map(u => {
+                const level = u.level || 1;
+                const xp = u.xp || 0;
+                const xpForNextLevel = level * 100;
+                const xpProgress = (xp % 100);
+                const progressPercent = (xpProgress / 100) * 100;
+                
+                return `
                 <tr style="${u.banned ? 'background: rgba(231, 76, 60, 0.2);' : ''}">
                     <td>${u.telegramId}</td>
                     <td>${u.firstName} ${u.banned ? '🚫' : ''}</td>
                     <td>${u.username ? '@' + u.username : '-'}</td>
                     <td>${u.coins}</td>
+                    <td style="font-weight: bold; color: #ffd700;">${level}</td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <span style="font-size: 12px; color: #aaa;">${xp}</span>
+                            <div style="width: 60px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                                <div style="width: ${progressPercent}%; height: 100%; background: linear-gradient(90deg, #ffd700, #ffed4e); transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                    </td>
                     <td>${u.inventory.length}</td>
                     <td style="display: flex; gap: 5px;">
                         <button class="btn-secondary" onclick="editUser(${u.telegramId})">✏️</button>
@@ -1210,7 +1239,8 @@
                         <button class="btn-secondary" onclick="resetUser(${u.telegramId})" title="Сбросить пользователя">🔄</button>
                     </td>
                 </tr>
-            `).join('') || '<tr><td colspan="6">Пользователей пока нет</td></tr>';
+                `;
+            }).join('') || '<tr><td colspan="8">Пользователей пока нет</td></tr>';
         }
         
         // Case Modal
@@ -1488,6 +1518,8 @@
             document.getElementById('user-telegram-id').value = user.telegramId;
             document.getElementById('user-name').value = `${user.firstName} (@${user.username || 'нет'})`;
             document.getElementById('user-coins').value = user.coins;
+            document.getElementById('user-level').value = user.level || 1;
+            document.getElementById('user-xp').value = user.xp || 0;
             
             renderUserInventory();
             document.getElementById('user-modal').classList.add('active');
@@ -1624,6 +1656,8 @@
             
             const telegramId = document.getElementById('user-telegram-id').value;
             const coins = parseInt(document.getElementById('user-coins').value);
+            const level = parseInt(document.getElementById('user-level').value);
+            const xp = parseInt(document.getElementById('user-xp').value);
             
             try {
                 // Update coins
@@ -1631,6 +1665,13 @@
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ coins })
+                });
+                
+                // Update level and xp
+                await fetch(`/api/users/${telegramId}/level`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ level, xp })
                 });
                 
                 // Update inventory

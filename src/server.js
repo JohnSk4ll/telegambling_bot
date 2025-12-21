@@ -155,6 +155,20 @@ export function setupServer(port = 5051) {
         }
         res.json(user);
     });
+    
+    // Update user level and xp
+    app.patch('/api/users/:telegramId/level', async (req, res) => {
+        const { level, xp } = req.body;
+        if (typeof level !== 'number' || typeof xp !== 'number') {
+            return res.status(400).json({ error: 'Level and XP must be numbers' });
+        }
+        
+        const user = await storage.updateUser(parseInt(req.params.telegramId), { level, xp });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    });
 
     // Ban user
     app.post('/api/users/:telegramId/ban', async (req, res) => {
